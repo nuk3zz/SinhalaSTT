@@ -4,6 +4,10 @@
 
 **SinhalaSTT 0.1.0 beta** is a local/offline macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
 
+![SinhalaSTT 0.1.0 beta desktop app](assets/app-screenshot.png)
+
+_SinhalaSTT 0.1.0 beta desktop app_
+
 It does **not** transcribe Sinhala automatically. Instead, it creates timestamp placeholder `.srt` files that you can fill with Sinhala text from manual typing, Helakuru, or another source.
 
 ```text

@@ -319,8 +319,8 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("Subtitle")
         subtitle.setWordWrap(True)
 
-        github_button = QPushButton("GitHub")
-        github_button.setMaximumWidth(84)
+        github_button = QPushButton("Check for Updates")
+        github_button.setMaximumWidth(140)
         github_button.clicked.connect(self.open_github)
 
         header = QHBoxLayout()
