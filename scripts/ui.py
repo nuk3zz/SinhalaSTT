@@ -34,6 +34,7 @@ from transcriber_core import (
     DOWNLOADS_OUTPUT_DIR,
     PlaceholderError,
     fill_placeholder_srt,
+    find_tool,
     generate_placeholder_srt,
     parse_srt_blocks,
 )
@@ -50,6 +51,10 @@ APP_NAME = "SinhalaSTT"
 APP_VERSION = "0.1.0 beta"
 APP_TAGLINE = "Create editable Sinhala subtitle timing drafts from audio or video."
 GITHUB_URL = "https://github.com/nuk3zz/SinhalaSTT"
+FFMPEG_INSTALL_MESSAGE = (
+    "FFmpeg setup needed: SinhalaSTT can open, but SRT creation needs FFmpeg. "
+    "Install it once with Homebrew: brew install ffmpeg"
+)
 
 SUPPORTED_AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".aiff", ".aif"}
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"}
@@ -347,9 +352,19 @@ class MainWindow(QMainWindow):
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
+        self.show_dependency_notice()
 
     def open_github(self) -> None:
         webbrowser.open(GITHUB_URL)
+
+    def show_dependency_notice(self) -> None:
+        if find_tool("ffmpeg") and find_tool("ffprobe"):
+            return
+
+        self.output_label.setText(FFMPEG_INSTALL_MESSAGE)
+        self.append_log("First-time setup note:")
+        self.append_log(FFMPEG_INSTALL_MESSAGE)
+        self.append_log("The app will not install anything automatically.")
 
     def build_create_tab(self) -> QWidget:
         self.file_label = QLabel("No file selected")
@@ -661,6 +676,10 @@ class MainWindow(QMainWindow):
         self.drop_zone.setEnabled(True)
         self.mode_box.setEnabled(True)
         self.start_button.setEnabled(self.selected_input is not None)
+        if "FFmpeg is not installed" in message or "FFprobe is not installed" in message:
+            self.output_label.setText(FFMPEG_INSTALL_MESSAGE)
+            self.append_log("Install FFmpeg, then reopen SinhalaSTT and try again.")
+            return
         QMessageBox.critical(self, "Placeholder generation failed", message)
 
     def reset_worker_refs(self) -> None:

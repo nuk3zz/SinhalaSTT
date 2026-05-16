@@ -50,6 +50,16 @@ Temporary converted WAV files save to:
 Desktop/Cache/temporary wav/
 ```
 
+### FFmpeg Requirement
+
+SinhalaSTT needs FFmpeg to read audio and video files.
+
+The app does not download or install anything automatically. If FFmpeg is missing, SinhalaSTT opens normally and shows a setup note. Install FFmpeg once with:
+
+```bash
+brew install ffmpeg
+```
+
 ## How To Use
 
 1. Open `SinhalaSTT`.
