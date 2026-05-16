@@ -49,7 +49,7 @@ MODE_LABELS = {
 APP_NAME = "SinhalaSTT"
 APP_VERSION = "0.1.0 beta"
 APP_TAGLINE = "Create editable Sinhala subtitle timing drafts from audio or video."
-GITHUB_URL = "https://github.com/search?q=SinhalaSTT&type=repositories"
+GITHUB_URL = "https://github.com/nuk3zz/SinhalaSTT"
 
 SUPPORTED_AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".aiff", ".aif"}
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"}
