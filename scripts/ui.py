@@ -942,7 +942,12 @@ class MainWindow(QMainWindow):
         return pasted_text_to_lines(self.paste_box.toPlainText(), mode)
 
     def apply_smart_split_to_paste(self) -> None:
-        lines = self.preview_pasted_lines()
+        mode = self.fill_mode_box.currentData()
+        lines = pasted_text_to_lines(
+            self.paste_box.toPlainText(),
+            mode,
+            preserve_existing_lines=False,
+        )
         if not lines:
             self.append_fill_status("Paste Sinhala text first, then split the paragraph.")
             return

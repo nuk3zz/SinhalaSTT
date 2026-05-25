@@ -518,16 +518,23 @@ def fill_placeholder_srt(
     )
 
 
-def pasted_text_to_lines(pasted_text: str, paste_mode: str | None = None) -> list[str]:
+def pasted_text_to_lines(
+    pasted_text: str,
+    paste_mode: str | None = None,
+    preserve_existing_lines: bool = True,
+) -> list[str]:
     if paste_mode in {None, "keep"}:
         return pasted_text.splitlines()
 
-    if "\n" in pasted_text or "\r" in pasted_text:
+    if preserve_existing_lines and ("\n" in pasted_text or "\r" in pasted_text):
         return pasted_text.splitlines()
 
     text = pasted_text.strip()
     if not text:
         return []
+
+    if not preserve_existing_lines:
+        return split_text_paragraphs(text, paste_mode)
 
     if paste_mode == "sentence":
         return split_paragraph_sentences(text)
@@ -536,6 +543,26 @@ def pasted_text_to_lines(pasted_text: str, paste_mode: str | None = None) -> lis
         return split_paragraph_words(text, int(paste_mode))
 
     return pasted_text.splitlines()
+
+
+def split_text_paragraphs(text: str, paste_mode: str | None) -> list[str]:
+    paragraphs = re.split(r"(?:\r?\n\s*){2,}", text)
+    lines: list[str] = []
+
+    for paragraph in paragraphs:
+        normalized = " ".join(paragraph.split())
+        if not normalized:
+            lines.append("")
+            continue
+
+        if paste_mode == "sentence":
+            lines.extend(split_paragraph_sentences(normalized))
+        elif paste_mode in {"1", "2", "3"}:
+            lines.extend(split_paragraph_words(normalized, int(paste_mode)))
+        else:
+            lines.append(normalized)
+
+    return lines
 
 
 def split_paragraph_words(text: str, words_per_line: int) -> list[str]:
