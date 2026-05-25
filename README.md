@@ -25,6 +25,7 @@ The Create and Fill tabs are fully offline. The AI Captions tab is optional and 
 - Choose placeholder size: sentences, 1 word, 2 words, or 3 words.
 - Paste Sinhala text line-by-line into matching subtitle blocks.
 - Paste one Sinhala paragraph and split it automatically into sentence, 1-word, 2-word, or 3-word lines.
+- Convert Unicode Sinhala into FM/DL-compatible legacy font text for Photoshop and Premiere workflows.
 - Generate an AI subtitle draft with Gemini Flash-Lite using your own API key.
 - Export filled `.srt` files.
 - Runs as a local macOS app.
@@ -96,6 +97,26 @@ If your Sinhala script is one paragraph, choose a paste split mode in the `Fill`
 ```
 
 Then click `Split Paragraph`, or just create the filled SRT. Existing line breaks are respected, so manual line-by-line paste still works.
+
+### FM/DL Legacy Font Output
+
+The `Fill` tab can also convert normal Sinhala Unicode into FM/DL-compatible legacy text. This legacy text may look like gibberish in a plain text editor, but it can display correctly after changing the font in Photoshop, Premiere, or another editor to a compatible Sinhala legacy font.
+
+Example:
+
+```text
+ලංකාවේ වැඩිම දුර යන්න පුලුවන් ඹුඩ්ගෙට් EV එකද?
+```
+
+converts to:
+
+```text
+,xldfõ jeäu ÿr hkak mq¨jka Uqâf.Ü EV tlo@
+```
+
+Use `Create Unicode SRT` for normal subtitles, or `Create FM/DL SRT` for legacy-font subtitles.
+
+The offline FM/DL conversion rules are based on the public FMAbhaya converter work by Malinthe Samarakoon, originally created by LTRL at the University of Colombo School of Computing.
 
 ### AI Captions
 

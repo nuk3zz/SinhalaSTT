@@ -36,6 +36,7 @@ from ai_captions_core import (
     estimate_gemini_cost,
     generate_ai_captions_srt,
 )
+from font_converter import unicode_to_fm
 from transcriber_core import (
     DEFAULT_PLACEHOLDER_MODE,
     DESKTOP_CACHE_AUDIO_DIR,
@@ -604,9 +605,20 @@ class MainWindow(QMainWindow):
         self.choose_srt_button = QPushButton("Choose SRT")
         self.choose_srt_button.clicked.connect(self.choose_srt)
 
-        self.fill_button = QPushButton("Create Filled SRT")
+        self.fill_button = QPushButton("Create Unicode SRT")
         self.fill_button.setEnabled(False)
-        self.fill_button.clicked.connect(self.create_filled_srt)
+        self.fill_button.clicked.connect(self.create_unicode_filled_srt)
+
+        self.convert_fm_button = QPushButton("Convert to FM/DL")
+        self.convert_fm_button.clicked.connect(self.convert_fill_text_to_fm)
+
+        self.copy_fm_button = QPushButton("Copy FM/DL Text")
+        self.copy_fm_button.setEnabled(False)
+        self.copy_fm_button.clicked.connect(self.copy_fm_text)
+
+        self.fm_fill_button = QPushButton("Create FM/DL SRT")
+        self.fm_fill_button.setEnabled(False)
+        self.fm_fill_button.clicked.connect(self.create_fm_filled_srt)
 
         self.fill_mode_box = QComboBox()
         self.fill_mode_box.addItem("Keep pasted lines", "keep")
@@ -624,7 +636,16 @@ class MainWindow(QMainWindow):
         )
         self.paste_box.textChanged.connect(self.update_fill_button)
         self.paste_box.textChanged.connect(self.update_line_numbers)
+        self.paste_box.textChanged.connect(self.clear_fm_output)
         self.paste_box.verticalScrollBar().valueChanged.connect(self.sync_line_number_scroll)
+
+        self.fm_box = QPlainTextEdit()
+        self.fm_box.setReadOnly(True)
+        self.fm_box.setPlaceholderText(
+            "FM/DL converted text appears here.\n"
+            "Copy it, or create an FM/DL SRT for legacy Sinhala fonts."
+        )
+        self.fm_box.verticalScrollBar().valueChanged.connect(self.sync_fm_scroll_to_unicode)
 
         self.line_numbers = QPlainTextEdit()
         self.line_numbers.setObjectName("LineNumbers")
@@ -642,6 +663,7 @@ class MainWindow(QMainWindow):
         button_row.setSpacing(8)
         button_row.addWidget(self.choose_srt_button)
         button_row.addWidget(self.fill_button)
+        button_row.addWidget(self.fm_fill_button)
         button_row.addStretch(1)
 
         split_row = QHBoxLayout()
@@ -649,11 +671,25 @@ class MainWindow(QMainWindow):
         split_row.addWidget(QLabel("Paste:"))
         split_row.addWidget(self.fill_mode_box, 1)
         split_row.addWidget(self.split_preview_button)
+        split_row.addWidget(self.convert_fm_button)
+        split_row.addWidget(self.copy_fm_button)
+
+        unicode_label = QLabel("Unicode Sinhala")
+        unicode_label.setObjectName("SmallNote")
+        fm_label = QLabel("FM/DL Legacy Text")
+        fm_label.setObjectName("SmallNote")
+
+        label_row = QHBoxLayout()
+        label_row.setSpacing(8)
+        label_row.addSpacing(60)
+        label_row.addWidget(unicode_label)
+        label_row.addWidget(fm_label)
 
         paste_row = QHBoxLayout()
         paste_row.setSpacing(6)
         paste_row.addWidget(self.line_numbers)
-        paste_row.addWidget(self.paste_box)
+        paste_row.addWidget(self.paste_box, 1)
+        paste_row.addWidget(self.fm_box, 1)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
@@ -661,6 +697,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.srt_label)
         layout.addLayout(button_row)
         layout.addLayout(split_row)
+        layout.addLayout(label_row)
         layout.addLayout(paste_row)
         layout.addWidget(self.fill_status_label)
 
@@ -864,9 +901,10 @@ class MainWindow(QMainWindow):
         self.update_fill_button()
 
     def update_fill_button(self) -> None:
-        self.fill_button.setEnabled(
-            self.selected_srt is not None and bool(self.paste_box.toPlainText())
-        )
+        has_text = bool(self.paste_box.toPlainText())
+        has_srt = self.selected_srt is not None
+        self.fill_button.setEnabled(has_srt and has_text)
+        self.fm_fill_button.setEnabled(has_srt and has_text)
 
     def load_srt_block_count(self, path: Path) -> None:
         try:
@@ -890,6 +928,11 @@ class MainWindow(QMainWindow):
 
     def sync_line_number_scroll(self, value: int) -> None:
         self.line_numbers.verticalScrollBar().setValue(value)
+        self.fm_box.verticalScrollBar().setValue(value)
+
+    def sync_fm_scroll_to_unicode(self, value: int) -> None:
+        self.paste_box.verticalScrollBar().setValue(value)
+        self.line_numbers.verticalScrollBar().setValue(value)
 
     def append_fill_status(self, message: str) -> None:
         self.fill_status_label.setText(message)
@@ -909,6 +952,40 @@ class MainWindow(QMainWindow):
         self.update_fill_button()
         self.update_line_numbers()
         self.append_fill_status(f"Split paste into {len(lines)} lines.")
+
+    def clear_fm_output(self) -> None:
+        if not hasattr(self, "fm_box"):
+            return
+        with QSignalBlocker(self.fm_box):
+            self.fm_box.clear()
+        self.copy_fm_button.setEnabled(False)
+
+    def convert_fill_text_to_fm(self) -> str:
+        lines = self.preview_pasted_lines()
+        if not lines:
+            self.append_fill_status("Paste Sinhala Unicode text first.")
+            return ""
+
+        source_text = "\n".join(lines)
+        result = unicode_to_fm(source_text)
+        self.fm_box.setPlainText(result.text)
+        self.copy_fm_button.setEnabled(bool(result.text))
+
+        status = f"Converted {len(lines)} lines to FM/DL legacy text."
+        if result.warnings:
+            status += "\n" + "\n".join(f"Note: {warning}" for warning in result.warnings)
+        self.append_fill_status(status)
+        return result.text
+
+    def copy_fm_text(self) -> None:
+        text = self.fm_box.toPlainText()
+        if not text:
+            text = self.convert_fill_text_to_fm()
+        if not text:
+            return
+
+        QApplication.clipboard().setText(text)
+        self.append_fill_status("FM/DL text copied to clipboard.")
 
     def start_generation(self) -> None:
         if self.selected_input is None:
@@ -982,7 +1059,7 @@ class MainWindow(QMainWindow):
 
         self.ai_thread.start()
 
-    def create_filled_srt(self) -> None:
+    def create_unicode_filled_srt(self) -> None:
         if self.selected_srt is None:
             QMessageBox.warning(self, "No SRT selected", "Please choose a placeholder SRT first.")
             return
@@ -1000,6 +1077,39 @@ class MainWindow(QMainWindow):
 
         status_lines = [
             f"Saved: {result.output_path}",
+            (
+                f"Blocks: {result.block_count} | Replaced: {result.replaced_count} | "
+                f"Skipped blank lines: {result.skipped_count}"
+            ),
+        ]
+        status_lines.extend(f"Note: {warning}" for warning in result.warnings)
+        self.fill_status_label.setText("\n".join(status_lines))
+
+    def create_fm_filled_srt(self) -> None:
+        if self.selected_srt is None:
+            QMessageBox.warning(self, "No SRT selected", "Please choose a placeholder SRT first.")
+            return
+
+        converted_text = self.fm_box.toPlainText()
+        if not converted_text:
+            converted_text = self.convert_fill_text_to_fm()
+        if not converted_text:
+            return
+
+        try:
+            result = fill_placeholder_srt(
+                self.selected_srt,
+                converted_text,
+                output_dir=DOWNLOADS_OUTPUT_DIR,
+                paste_mode="keep",
+                output_suffix="_filled_fm",
+            )
+        except PlaceholderError as error:
+            QMessageBox.critical(self, "Could not fill SRT", str(error))
+            return
+
+        status_lines = [
+            f"Saved FM/DL SRT: {result.output_path}",
             (
                 f"Blocks: {result.block_count} | Replaced: {result.replaced_count} | "
                 f"Skipped blank lines: {result.skipped_count}"

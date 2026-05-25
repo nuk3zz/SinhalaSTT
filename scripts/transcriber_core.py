@@ -451,9 +451,13 @@ def write_raw_srt_blocks(blocks: list[list[str]], output_path: Path) -> None:
             file.write("\n\n")
 
 
-def output_path_for_filled_srt(srt_path: Path, output_dir: Path | None = None) -> Path:
+def output_path_for_filled_srt(
+    srt_path: Path,
+    output_dir: Path | None = None,
+    suffix: str = "_filled",
+) -> Path:
     base_dir = output_dir or srt_path.parent
-    return base_dir / f"{srt_path.stem}_filled{srt_path.suffix}"
+    return base_dir / f"{srt_path.stem}{suffix}{srt_path.suffix}"
 
 
 def fill_placeholder_srt(
@@ -461,6 +465,7 @@ def fill_placeholder_srt(
     pasted_text: str,
     output_dir: Path | None = None,
     paste_mode: str | None = None,
+    output_suffix: str = "_filled",
 ) -> FillResult:
     srt_path = Path(srt_file).expanduser().resolve()
     blocks = parse_srt_blocks(srt_path)
@@ -494,7 +499,11 @@ def fill_placeholder_srt(
             f"You pasted {extra_line_count} extra lines. Extra lines were ignored."
         )
 
-    output_path = output_path_for_filled_srt(srt_path, output_dir=output_dir)
+    output_path = output_path_for_filled_srt(
+        srt_path,
+        output_dir=output_dir,
+        suffix=output_suffix,
+    )
     write_raw_srt_blocks(blocks, output_path)
 
     return FillResult(
