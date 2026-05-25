@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from google import genai
-from google.genai import types
+import requests
 
 from transcriber_core import (
     DOWNLOADS_OUTPUT_DIR,
@@ -31,6 +31,7 @@ ESTIMATED_AUDIO_INPUT_PRICE_PER_MILLION = 0.50
 ESTIMATED_TEXT_OUTPUT_PRICE_PER_MILLION = 1.50
 GEMINI_REQUEST_TIMEOUT_MS = 120_000
 INLINE_AUDIO_LIMIT_BYTES = 20 * 1024 * 1024
+GEMINI_API_VERSION = "v1beta"
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,103 @@ def _caption_schema() -> dict[str, Any]:
     }
 
 
+def _gemini_generate_content(
+    api_key: str,
+    model: str,
+    audio_path: Path,
+    duration_seconds: float,
+    log: LogCallback,
+) -> dict[str, Any]:
+    audio_size = audio_path.stat().st_size
+    log(f"Prepared WAV size: {audio_size / (1024 * 1024):.2f} MB")
+    if audio_size > INLINE_AUDIO_LIMIT_BYTES:
+        raise AiCaptionError(
+            "This audio is too large for the current AI Captions beta. "
+            "Try a shorter clip first."
+        )
+
+    log("Encoding audio for Gemini...")
+    audio_base64 = base64.b64encode(audio_path.read_bytes()).decode("ascii")
+    url = (
+        f"https://generativelanguage.googleapis.com/{GEMINI_API_VERSION}/"
+        f"models/{model}:generateContent"
+    )
+    body = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": _caption_prompt(duration_seconds)},
+                    {
+                        "inlineData": {
+                            "mimeType": "audio/wav",
+                            "data": audio_base64,
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "responseMimeType": "application/json",
+            "responseSchema": _caption_schema(),
+        },
+    }
+
+    log("Contacting Gemini API...")
+    try:
+        response = requests.post(
+            url,
+            params={"key": api_key},
+            json=body,
+            timeout=(10, GEMINI_REQUEST_TIMEOUT_MS / 1000),
+        )
+    except requests.Timeout as error:
+        log("Gemini request timed out.")
+        raise AiCaptionError(
+            "Gemini did not respond within 2 minutes. Try again later, or test with a shorter clip. "
+            "Free tier can be slow or rate-limited."
+        ) from error
+    except requests.RequestException as error:
+        log("Network request failed before Gemini returned a response.")
+        raise AiCaptionError(f"Could not reach Gemini: {error}") from error
+
+    log(f"Gemini HTTP status: {response.status_code}")
+
+    if response.status_code == 429:
+        log("Google says: 429 TooManyRequests.")
+        raise AiCaptionError(
+            "Gemini rate limit hit: Google returned 429 TooManyRequests. "
+            "Wait 10-15 minutes and try one short clip again. "
+            "Free tier/Tier 1 limits can be strict for audio."
+        )
+
+    if response.status_code == 400:
+        log("Google rejected the request.")
+        raise AiCaptionError(
+            "Gemini rejected the request. Check that your API key is valid for Gemini API "
+            "and try a shorter audio clip."
+        )
+
+    if response.status_code >= 400:
+        try:
+            error_data = response.json().get("error", {})
+            message = error_data.get("message") or response.text[:300]
+        except ValueError:
+            message = response.text[:300]
+        log(f"Gemini error message: {message}")
+        raise AiCaptionError(f"Gemini request failed ({response.status_code}): {message}")
+
+    try:
+        data = response.json()
+    except ValueError as error:
+        log("Gemini returned non-JSON HTTP content.")
+        raise AiCaptionError("Gemini returned a response that was not valid JSON.") from error
+
+    log("Gemini response received. Parsing subtitles...")
+    return data
+
+
 def _response_to_json(response: Any) -> dict[str, Any]:
     parsed = getattr(response, "parsed", None)
     if isinstance(parsed, dict):
@@ -100,6 +198,33 @@ def _response_to_json(response: Any) -> dict[str, Any]:
     text = text.strip()
     if not text:
         raise AiCaptionError("Gemini returned an empty response.")
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+        raise AiCaptionError("Gemini returned text that could not be converted into subtitles.") from error
+
+
+def _rest_response_to_json(response_data: dict[str, Any]) -> dict[str, Any]:
+    try:
+        parts = response_data["candidates"][0]["content"]["parts"]
+    except (KeyError, IndexError, TypeError) as error:
+        raise AiCaptionError("Gemini did not return subtitle content.") from error
+
+    text_parts = [
+        str(part.get("text", "")).strip()
+        for part in parts
+        if isinstance(part, dict) and part.get("text")
+    ]
+    text = "\n".join(text_parts).strip()
+    if not text:
+        raise AiCaptionError("Gemini returned an empty transcript.")
 
     try:
         return json.loads(text)
@@ -192,68 +317,13 @@ def generate_ai_captions_srt(
     progress(35)
     log(f"Sending extracted audio to Gemini: {model}")
     log("This should usually finish within 1-2 minutes for short clips.")
-    client = genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(timeout=GEMINI_REQUEST_TIMEOUT_MS),
-    )
-    uploaded_file = None
 
-    try:
-        audio_size = audio_path.stat().st_size
-        if audio_size <= INLINE_AUDIO_LIMIT_BYTES:
-            log("Sending audio directly...")
-            audio_part = types.Part.from_bytes(
-                data=audio_path.read_bytes(),
-                mime_type="audio/wav",
-            )
-        else:
-            log("Uploading larger audio file...")
-            uploaded_file = client.files.upload(file=str(audio_path))
-            audio_part = uploaded_file
-
-        progress(55)
-        log("Waiting for Gemini transcript...")
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=_caption_schema(),
-            temperature=0.1,
-        )
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                _caption_prompt(duration_seconds),
-                audio_part,
-            ],
-            config=config,
-        )
-    except Exception as error:
-        error_text = str(error)
-        error_text_lower = error_text.lower()
-        if "429" in error_text or "toomanyrequests" in error_text_lower or "rate limit" in error_text_lower:
-            raise AiCaptionError(
-                "Gemini rate limit hit: Google returned 429 TooManyRequests. "
-                "Wait a few minutes and try again, or test with a shorter clip. "
-                "Free tier/Tier 1 limits can be strict."
-            ) from error
-        if "timed out" in error_text_lower or "timeout" in error_text_lower:
-            raise AiCaptionError(
-                "Gemini did not respond within 2 minutes. Try again, or test with a shorter clip. "
-                "Free tier can be slow or rate-limited."
-            ) from error
-        raise AiCaptionError(f"Gemini caption generation failed: {error}") from error
-    finally:
-        if uploaded_file is not None:
-            try:
-                client.files.delete(name=uploaded_file.name)
-            except Exception:
-                pass
-        try:
-            client.close()
-        except Exception:
-            pass
+    progress(55)
+    log("Waiting for Gemini transcript...")
+    response_data = _gemini_generate_content(api_key, model, audio_path, duration_seconds, log=log)
 
     progress(75)
-    data = _response_to_json(response)
+    data = _rest_response_to_json(response_data)
     blocks, warnings = _blocks_from_response(data, duration_seconds)
 
     output_dir.mkdir(parents=True, exist_ok=True)
