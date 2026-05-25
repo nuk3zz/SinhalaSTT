@@ -29,6 +29,8 @@ DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 AUDIO_INPUT_TOKENS_PER_SECOND = 25
 ESTIMATED_AUDIO_INPUT_PRICE_PER_MILLION = 0.50
 ESTIMATED_TEXT_OUTPUT_PRICE_PER_MILLION = 1.50
+GEMINI_REQUEST_TIMEOUT_MS = 120_000
+INLINE_AUDIO_LIMIT_BYTES = 20 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -189,11 +191,28 @@ def generate_ai_captions_srt(
 
     progress(35)
     log(f"Sending extracted audio to Gemini: {model}")
-    client = genai.Client(api_key=api_key)
+    log("This should usually finish within 1-2 minutes for short clips.")
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=GEMINI_REQUEST_TIMEOUT_MS),
+    )
     uploaded_file = None
 
     try:
-        uploaded_file = client.files.upload(file=str(audio_path))
+        audio_size = audio_path.stat().st_size
+        if audio_size <= INLINE_AUDIO_LIMIT_BYTES:
+            log("Sending audio directly...")
+            audio_part = types.Part.from_bytes(
+                data=audio_path.read_bytes(),
+                mime_type="audio/wav",
+            )
+        else:
+            log("Uploading larger audio file...")
+            uploaded_file = client.files.upload(file=str(audio_path))
+            audio_part = uploaded_file
+
+        progress(55)
+        log("Waiting for Gemini transcript...")
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=_caption_schema(),
@@ -203,11 +222,24 @@ def generate_ai_captions_srt(
             model=model,
             contents=[
                 _caption_prompt(duration_seconds),
-                uploaded_file,
+                audio_part,
             ],
             config=config,
         )
     except Exception as error:
+        error_text = str(error)
+        error_text_lower = error_text.lower()
+        if "429" in error_text or "toomanyrequests" in error_text_lower or "rate limit" in error_text_lower:
+            raise AiCaptionError(
+                "Gemini rate limit hit: Google returned 429 TooManyRequests. "
+                "Wait a few minutes and try again, or test with a shorter clip. "
+                "Free tier/Tier 1 limits can be strict."
+            ) from error
+        if "timed out" in error_text_lower or "timeout" in error_text_lower:
+            raise AiCaptionError(
+                "Gemini did not respond within 2 minutes. Try again, or test with a shorter clip. "
+                "Free tier can be slow or rate-limited."
+            ) from error
         raise AiCaptionError(f"Gemini caption generation failed: {error}") from error
     finally:
         if uploaded_file is not None:
