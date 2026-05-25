@@ -73,131 +73,180 @@ SUPPORTED_INPUT_SUFFIXES = SUPPORTED_AUDIO_SUFFIXES | SUPPORTED_VIDEO_SUFFIXES
 
 APP_STYLE = """
 QMainWindow, QWidget {
-    background: #111111;
-    color: #e8e8e8;
-    font-size: 12px;
+    background: #f7f8fb;
+    color: #171b22;
+    font-size: 13px;
 }
 QLabel#Title {
-    color: #f2f2f2;
-    font-size: 18px;
+    color: #10141a;
+    font-size: 20px;
     font-weight: 750;
 }
 QLabel#Version {
-    color: #9a9a9a;
-    font-size: 11px;
+    color: #6b7280;
+    font-size: 12px;
 }
 QLabel#Subtitle {
-    color: #9a9a9a;
+    color: #5f6773;
 }
-QLabel#Banner {
-    background: #0b0b0b;
-    border: 1px solid #242424;
-    border-radius: 7px;
+QWidget#Hero, QWidget#Banner {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #ffffff, stop:1 #eef2f7);
+    border: 1px solid #dde3ec;
+    border-radius: 12px;
+}
+QWidget#HeroHover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #ffffff, stop:1 #eaf2fb);
+    border: 1px solid #a8bbd6;
+    border-radius: 12px;
+}
+QLabel#HeroTitle {
+    color: #111827;
+    font-size: 30px;
+    font-weight: 760;
+}
+QLabel#HeroTagline {
+    color: #6b7280;
+    font-size: 14px;
+}
+QLabel#BetaPill {
+    color: #5f6773;
+    background: #edf0f4;
+    border: 1px solid #dbe1ea;
+    border-radius: 8px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 700;
 }
 QLabel#PathLabel {
-    color: #cfcfcf;
-    background: #171717;
-    border: 1px solid #2b2b2b;
-    border-radius: 5px;
-    padding: 5px;
+    color: #4b5563;
+    background: #ffffff;
+    border: 1px solid #dfe4ec;
+    border-radius: 8px;
+    padding: 7px;
 }
 QLabel#SmallNote {
-    color: #8f8f8f;
+    color: #777f8c;
     font-size: 11px;
 }
 QLabel#DropZone {
-    color: #d8d8d8;
-    background: #151515;
-    border: 1px dashed #555555;
-    border-radius: 7px;
+    color: #4b5563;
+    background: #fbfcfe;
+    border: 1px dashed #c7d0dd;
+    border-radius: 12px;
     padding: 10px;
     font-weight: 650;
 }
+QLabel#DropZone:hover {
+    background: #ffffff;
+    border: 1px dashed #7f99bd;
+    color: #1f2937;
+}
 QLabel#DropZone[dragging="true"] {
-    background: #1d2426;
-    border: 1px solid #7aa7b2;
+    background: #eef6ff;
+    border: 1px solid #6b94cc;
 }
 QPushButton {
-    color: #e8e8e8;
-    background: #202020;
-    border: 1px solid #3a3a3a;
-    border-radius: 6px;
-    padding: 7px 10px;
+    color: #171b22;
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    border-radius: 9px;
+    padding: 8px 12px;
     font-weight: 650;
 }
 QPushButton:hover {
-    background: #2a2a2a;
-    border: 1px solid #5a5a5a;
+    background: #fbfdff;
+    border: 1px solid #8aa2c6;
+    color: #0f172a;
+}
+QPushButton:pressed {
+    background: #eef4fb;
+    border: 1px solid #6685b3;
 }
 QPushButton:disabled {
-    color: #666666;
-    border: 1px solid #2a2a2a;
-    background: #181818;
+    color: #a6adba;
+    border: 1px solid #e1e5ec;
+    background: #f0f2f5;
 }
 QComboBox {
-    color: #e8e8e8;
-    background: #171717;
-    border: 1px solid #3a3a3a;
-    border-radius: 6px;
-    padding: 6px;
-}
-QLineEdit {
-    color: #e8e8e8;
-    background: #171717;
-    border: 1px solid #3a3a3a;
-    border-radius: 6px;
+    color: #171b22;
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    border-radius: 9px;
     padding: 7px;
 }
+QComboBox:hover {
+    border: 1px solid #8aa2c6;
+}
+QLineEdit {
+    color: #171b22;
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    border-radius: 9px;
+    padding: 8px;
+}
+QLineEdit:hover, QLineEdit:focus {
+    border: 1px solid #8aa2c6;
+}
 QCheckBox {
-    color: #cfcfcf;
+    color: #4b5563;
 }
 QComboBox QAbstractItemView {
-    color: #e8e8e8;
-    background: #171717;
-    selection-background-color: #2f3f43;
+    color: #171b22;
+    background: #ffffff;
+    selection-background-color: #e8f0fb;
 }
 QPlainTextEdit {
-    color: #efefef;
-    background: #171717;
-    border: 1px solid #333333;
-    border-radius: 6px;
-    padding: 6px;
-    selection-background-color: #35535a;
+    color: #171b22;
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    padding: 8px;
+    selection-background-color: #d7e7fb;
+}
+QPlainTextEdit:hover, QPlainTextEdit:focus {
+    border: 1px solid #8aa2c6;
 }
 QPlainTextEdit#LineNumbers {
-    color: #777777;
-    border: 1px solid #2b2b2b;
+    color: #8b95a3;
+    background: #f4f6f9;
+    border: 1px solid #d8dee8;
     max-width: 54px;
 }
 QProgressBar {
-    color: #cfcfcf;
-    background: #171717;
-    border: 1px solid #2b2b2b;
-    border-radius: 5px;
+    color: #4b5563;
+    background: #edf1f6;
+    border: 1px solid #e2e7ef;
+    border-radius: 6px;
     height: 10px;
     text-align: center;
 }
 QProgressBar::chunk {
-    background: #7aa7b2;
-    border-radius: 4px;
+    background: #7fa2c7;
+    border-radius: 5px;
 }
 QTabWidget::pane {
-    border: 1px solid #2b2b2b;
-    border-radius: 7px;
+    border: 1px solid #dfe4ec;
+    border-radius: 12px;
     top: -1px;
+    background: #ffffff;
 }
 QTabBar::tab {
-    color: #9a9a9a;
-    background: #151515;
-    border: 1px solid #2b2b2b;
-    padding: 6px 10px;
-    border-top-left-radius: 5px;
-    border-top-right-radius: 5px;
+    color: #596273;
+    background: #eef1f5;
+    border: 1px solid #e2e6ee;
+    padding: 7px 18px;
+    border-radius: 9px;
+    margin: 0 2px;
+}
+QTabBar::tab:hover {
+    color: #111827;
+    background: #ffffff;
+    border: 1px solid #b9c6d8;
 }
 QTabBar::tab:selected {
-    color: #f2f2f2;
-    border-color: #4a4a4a;
-    background: #202020;
+    color: #111827;
+    border-color: #d8dee8;
+    background: #ffffff;
 }
 """
 
@@ -207,32 +256,70 @@ def resource_path(relative_path: str) -> Path:
     return base_path / relative_path
 
 
-class BannerLabel(QLabel):
+class HeroBanner(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("Banner")
-        self.setMinimumHeight(104)
-        self.setMaximumHeight(130)
-        self.setAlignment(Qt.AlignCenter)
-        self._pixmap = QPixmap(str(resource_path("assets/banner.png")))
-        self.update_pixmap()
+        self.setMinimumHeight(112)
+        self.setMaximumHeight(140)
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self.update_pixmap()
-
-    def update_pixmap(self) -> None:
-        if self._pixmap.isNull():
-            self.setText(APP_NAME)
-            return
-
-        self.setPixmap(
-            self._pixmap.scaled(
-                self.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
+        icon = QLabel()
+        icon.setFixedSize(92, 92)
+        icon.setAlignment(Qt.AlignCenter)
+        icon_pixmap = QPixmap(str(resource_path("assets/icon-source.png")))
+        if not icon_pixmap.isNull():
+            icon.setPixmap(
+                icon_pixmap.scaled(
+                    icon.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
             )
-        )
+
+        title = QLabel(APP_NAME)
+        title.setObjectName("HeroTitle")
+
+        beta = QLabel("BETA")
+        beta.setObjectName("BetaPill")
+        beta.setMaximumWidth(56)
+        beta.setAlignment(Qt.AlignCenter)
+
+        tagline = QLabel("Turning Sinhala speech into accurate subtitles.")
+        tagline.setObjectName("HeroTagline")
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(12)
+        title_row.addWidget(title)
+        title_row.addWidget(beta)
+        title_row.addStretch(1)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(8)
+        text_layout.addStretch(1)
+        text_layout.addLayout(title_row)
+        text_layout.addWidget(tagline)
+        text_layout.addStretch(1)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(28, 14, 28, 14)
+        layout.setSpacing(24)
+        layout.addWidget(icon)
+        layout.addLayout(text_layout, 1)
+        self.setLayout(layout)
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self.setObjectName("HeroHover")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self.setObjectName("Hero")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().leaveEvent(event)
 
 
 class DropZone(QLabel):
@@ -376,10 +463,10 @@ class MainWindow(QMainWindow):
         self.ai_worker: AiCaptionWorker | None = None
 
         self.setWindowTitle(APP_NAME)
-        self.setMinimumSize(540, 520)
-        self.resize(620, 560)
+        self.setMinimumSize(620, 600)
+        self.resize(760, 680)
 
-        self.banner = BannerLabel()
+        self.banner = HeroBanner()
 
         title = QLabel(APP_NAME)
         title.setObjectName("Title")
