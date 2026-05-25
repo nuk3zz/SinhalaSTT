@@ -460,10 +460,11 @@ def fill_placeholder_srt(
     srt_file: str | Path,
     pasted_text: str,
     output_dir: Path | None = None,
+    paste_mode: str | None = None,
 ) -> FillResult:
     srt_path = Path(srt_file).expanduser().resolve()
     blocks = parse_srt_blocks(srt_path)
-    pasted_lines = pasted_text.splitlines()
+    pasted_lines = pasted_text_to_lines(pasted_text, paste_mode)
 
     replaced_count = 0
     skipped_count = 0
@@ -506,6 +507,40 @@ def fill_placeholder_srt(
         extra_line_count=extra_line_count,
         warnings=warnings,
     )
+
+
+def pasted_text_to_lines(pasted_text: str, paste_mode: str | None = None) -> list[str]:
+    if paste_mode in {None, "keep"}:
+        return pasted_text.splitlines()
+
+    if "\n" in pasted_text or "\r" in pasted_text:
+        return pasted_text.splitlines()
+
+    text = pasted_text.strip()
+    if not text:
+        return []
+
+    if paste_mode == "sentence":
+        return split_paragraph_sentences(text)
+
+    if paste_mode in {"1", "2", "3"}:
+        return split_paragraph_words(text, int(paste_mode))
+
+    return pasted_text.splitlines()
+
+
+def split_paragraph_words(text: str, words_per_line: int) -> list[str]:
+    words = re.findall(r"\S+", text)
+    return [
+        " ".join(words[index : index + words_per_line])
+        for index in range(0, len(words), words_per_line)
+    ]
+
+
+def split_paragraph_sentences(text: str) -> list[str]:
+    sentence_parts = re.findall(r".+?(?:[.!?।]+|$)", text, flags=re.DOTALL)
+    lines = [part.strip() for part in sentence_parts if part.strip()]
+    return lines or [text]
 
 
 def build_warnings(regions: list[SpeechRegion], blocks: list[SubtitleBlock]) -> list[str]:

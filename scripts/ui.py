@@ -10,14 +10,16 @@ import traceback
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSignalBlocker, QThread, Qt, Signal
+from PySide6.QtCore import QObject, QSettings, QSignalBlocker, QThread, Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -28,6 +30,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ai_captions_core import (
+    DEFAULT_GEMINI_MODEL,
+    AiCaptionError,
+    estimate_gemini_cost,
+    generate_ai_captions_srt,
+)
 from transcriber_core import (
     DEFAULT_PLACEHOLDER_MODE,
     DESKTOP_CACHE_AUDIO_DIR,
@@ -36,7 +44,9 @@ from transcriber_core import (
     fill_placeholder_srt,
     find_tool,
     generate_placeholder_srt,
+    get_audio_duration,
     parse_srt_blocks,
+    pasted_text_to_lines,
 )
 
 
@@ -91,6 +101,10 @@ QLabel#PathLabel {
     border-radius: 5px;
     padding: 5px;
 }
+QLabel#SmallNote {
+    color: #8f8f8f;
+    font-size: 11px;
+}
 QLabel#DropZone {
     color: #d8d8d8;
     background: #151515;
@@ -126,6 +140,16 @@ QComboBox {
     border: 1px solid #3a3a3a;
     border-radius: 6px;
     padding: 6px;
+}
+QLineEdit {
+    color: #e8e8e8;
+    background: #171717;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 7px;
+}
+QCheckBox {
+    color: #cfcfcf;
 }
 QComboBox QAbstractItemView {
     color: #e8e8e8;
@@ -301,14 +325,55 @@ class PlaceholderWorker(QObject):
             self.failed.emit("Unexpected error:\n\n" + traceback.format_exc())
 
 
+class AiCaptionWorker(QObject):
+    log_message = Signal(str)
+    progress_changed = Signal(int)
+    finished = Signal(str, int, float, list)
+    failed = Signal(str)
+
+    def __init__(self, input_path: Path, api_key: str, model: str) -> None:
+        super().__init__()
+        self.input_path = input_path
+        self.api_key = api_key
+        self.model = model
+
+    def run(self) -> None:
+        try:
+            result = generate_ai_captions_srt(
+                self.input_path,
+                api_key=self.api_key,
+                model=self.model,
+                audio_dir=DESKTOP_CACHE_AUDIO_DIR,
+                output_dir=DOWNLOADS_OUTPUT_DIR,
+                log=self.log_message.emit,
+                progress=self.progress_changed.emit,
+            )
+            self.finished.emit(
+                str(result.subtitle_path),
+                result.subtitle_count,
+                result.duration_seconds,
+                result.warnings,
+            )
+        except AiCaptionError as error:
+            self.failed.emit(str(error))
+        except PlaceholderError as error:
+            self.failed.emit(str(error))
+        except Exception:
+            self.failed.emit("Unexpected error:\n\n" + traceback.format_exc())
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.selected_input: Path | None = None
+        self.selected_ai_input: Path | None = None
         self.selected_srt: Path | None = None
         self.current_srt_block_count = 0
+        self.settings = QSettings(APP_NAME, APP_NAME)
         self.thread: QThread | None = None
         self.worker: PlaceholderWorker | None = None
+        self.ai_thread: QThread | None = None
+        self.ai_worker: AiCaptionWorker | None = None
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(540, 520)
@@ -340,6 +405,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.build_create_tab(), "Create")
         self.tabs.addTab(self.build_fill_tab(), "Fill")
+        self.tabs.addTab(self.build_ai_tab(), "AI Captions")
 
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
@@ -441,10 +507,19 @@ class MainWindow(QMainWindow):
         self.fill_button.setEnabled(False)
         self.fill_button.clicked.connect(self.create_filled_srt)
 
+        self.fill_mode_box = QComboBox()
+        self.fill_mode_box.addItem("Keep pasted lines", "keep")
+        for mode, label in MODE_LABELS.items():
+            self.fill_mode_box.addItem(f"Split paragraph: {label}", mode)
+        self.fill_mode_box.currentIndexChanged.connect(self.update_line_numbers)
+
+        self.split_preview_button = QPushButton("Split Paragraph")
+        self.split_preview_button.clicked.connect(self.apply_smart_split_to_paste)
+
         self.paste_box = QPlainTextEdit()
         self.paste_box.setPlaceholderText(
-            "Paste Sinhala text here, one line per subtitle block.\n"
-            "Blank lines skip matching placeholders."
+            "Paste Sinhala text here.\n"
+            "Line-by-line text stays line-by-line. A single paragraph can be split automatically."
         )
         self.paste_box.textChanged.connect(self.update_fill_button)
         self.paste_box.textChanged.connect(self.update_line_numbers)
@@ -468,6 +543,12 @@ class MainWindow(QMainWindow):
         button_row.addWidget(self.fill_button)
         button_row.addStretch(1)
 
+        split_row = QHBoxLayout()
+        split_row.setSpacing(8)
+        split_row.addWidget(QLabel("Paste:"))
+        split_row.addWidget(self.fill_mode_box, 1)
+        split_row.addWidget(self.split_preview_button)
+
         paste_row = QHBoxLayout()
         paste_row.setSpacing(6)
         paste_row.addWidget(self.line_numbers)
@@ -478,8 +559,89 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
         layout.addWidget(self.srt_label)
         layout.addLayout(button_row)
+        layout.addLayout(split_row)
         layout.addLayout(paste_row)
         layout.addWidget(self.fill_status_label)
+
+        tab = QWidget()
+        tab.setLayout(layout)
+        return tab
+
+    def build_ai_tab(self) -> QWidget:
+        saved_key = self.settings.value("gemini_api_key", "", str)
+
+        self.ai_key_input = QLineEdit()
+        self.ai_key_input.setEchoMode(QLineEdit.Password)
+        self.ai_key_input.setPlaceholderText("Paste Gemini API key")
+        self.ai_key_input.setText(saved_key)
+
+        self.ai_remember_check = QCheckBox("Remember locally")
+        self.ai_remember_check.setChecked(bool(saved_key))
+
+        self.ai_model_label = QLabel(f"Model: Gemini Flash-Lite ({DEFAULT_GEMINI_MODEL})")
+        self.ai_model_label.setObjectName("PathLabel")
+        self.ai_model_label.setWordWrap(True)
+
+        self.ai_note_label = QLabel(
+            "Offline tools stay local. AI Captions sends extracted audio to Google Gemini using your API key."
+        )
+        self.ai_note_label.setObjectName("SmallNote")
+        self.ai_note_label.setWordWrap(True)
+
+        self.ai_drop_zone = DropZone()
+        self.ai_drop_zone.file_dropped.connect(self.set_ai_selected_input)
+        self.ai_drop_zone.rejected.connect(self.append_ai_log)
+
+        self.ai_choose_audio_button = QPushButton("Import Audio")
+        self.ai_choose_audio_button.clicked.connect(self.choose_ai_audio)
+
+        self.ai_choose_video_button = QPushButton("Import MP4/Video")
+        self.ai_choose_video_button.clicked.connect(self.choose_ai_video)
+
+        self.ai_file_label = QLabel("No file selected")
+        self.ai_file_label.setObjectName("PathLabel")
+        self.ai_file_label.setWordWrap(True)
+
+        self.ai_estimate_label = QLabel("Select a file to see an approximate Gemini cost.")
+        self.ai_estimate_label.setObjectName("PathLabel")
+        self.ai_estimate_label.setWordWrap(True)
+
+        self.ai_start_button = QPushButton("Generate AI Captions")
+        self.ai_start_button.setEnabled(False)
+        self.ai_start_button.clicked.connect(self.start_ai_generation)
+
+        self.ai_progress_bar = QProgressBar()
+        self.ai_progress_bar.setRange(0, 100)
+        self.ai_progress_bar.setValue(0)
+
+        self.ai_log_box = QPlainTextEdit()
+        self.ai_log_box.setReadOnly(True)
+        self.ai_log_box.setMaximumHeight(120)
+        self.ai_log_box.setPlaceholderText("AI logs...")
+
+        key_row = QHBoxLayout()
+        key_row.setSpacing(8)
+        key_row.addWidget(self.ai_key_input, 1)
+        key_row.addWidget(self.ai_remember_check)
+
+        import_row = QHBoxLayout()
+        import_row.setSpacing(8)
+        import_row.addWidget(self.ai_choose_audio_button)
+        import_row.addWidget(self.ai_choose_video_button)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        layout.addLayout(key_row)
+        layout.addWidget(self.ai_model_label)
+        layout.addWidget(self.ai_note_label)
+        layout.addWidget(self.ai_drop_zone)
+        layout.addLayout(import_row)
+        layout.addWidget(self.ai_file_label)
+        layout.addWidget(self.ai_estimate_label)
+        layout.addWidget(self.ai_start_button)
+        layout.addWidget(self.ai_progress_bar)
+        layout.addWidget(self.ai_log_box)
 
         tab = QWidget()
         tab.setLayout(layout)
@@ -507,6 +669,28 @@ class MainWindow(QMainWindow):
         if file_name:
             self.set_selected_input(Path(file_name))
 
+    def choose_ai_audio(self) -> None:
+        file_name, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Import Audio for AI Captions",
+            str(Path.home() / "Documents"),
+            "Audio files (*.mp3 *.wav *.m4a *.aac *.flac *.aiff *.aif);;All files (*)",
+        )
+
+        if file_name:
+            self.set_ai_selected_input(Path(file_name))
+
+    def choose_ai_video(self) -> None:
+        file_name, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Import Video for AI Captions",
+            str(Path.home() / "Movies"),
+            "Video files (*.mp4 *.mov *.m4v *.mkv *.avi *.webm);;All files (*)",
+        )
+
+        if file_name:
+            self.set_ai_selected_input(Path(file_name))
+
     def set_selected_input(self, path: Path) -> None:
         path = path.expanduser()
         suffix = path.suffix.lower()
@@ -526,6 +710,36 @@ class MainWindow(QMainWindow):
         self.start_button.setEnabled(True)
         self.log_box.clear()
         self.append_log(f"Selected: {path.name}")
+
+    def set_ai_selected_input(self, path: Path) -> None:
+        path = path.expanduser()
+        suffix = path.suffix.lower()
+
+        if suffix not in SUPPORTED_INPUT_SUFFIXES:
+            QMessageBox.warning(
+                self,
+                "Unsupported file",
+                "Please choose MP3, WAV, M4A, AAC, FLAC, AIFF, MP4, MOV, MKV, AVI, or WEBM.",
+            )
+            return
+
+        self.selected_ai_input = path
+        self.ai_file_label.setText(str(path))
+        self.ai_drop_zone.setText(f"Selected:\n{path.name}")
+        self.ai_progress_bar.setValue(0)
+        self.ai_start_button.setEnabled(True)
+        self.ai_log_box.clear()
+        self.append_ai_log(f"Selected: {path.name}")
+
+        try:
+            duration = get_audio_duration(path)
+            self.ai_estimate_label.setText(
+                f"Duration: {duration:.1f}s | {estimate_gemini_cost(duration)}"
+            )
+        except Exception:
+            self.ai_estimate_label.setText(
+                "Cost estimate appears after FFmpeg prepares the audio."
+            )
 
     def choose_srt(self) -> None:
         file_name, _filter = QFileDialog.getOpenFileName(
@@ -565,7 +779,7 @@ class MainWindow(QMainWindow):
         self.update_line_numbers()
 
     def update_line_numbers(self) -> None:
-        pasted_line_count = max(1, len(self.paste_box.toPlainText().splitlines()))
+        pasted_line_count = max(1, len(self.preview_pasted_lines()))
         count = max(self.current_srt_block_count, pasted_line_count)
         numbers = "\n".join(f"{number:03d}" for number in range(1, count + 1))
 
@@ -578,6 +792,22 @@ class MainWindow(QMainWindow):
 
     def append_fill_status(self, message: str) -> None:
         self.fill_status_label.setText(message)
+
+    def preview_pasted_lines(self) -> list[str]:
+        mode = self.fill_mode_box.currentData() if hasattr(self, "fill_mode_box") else "keep"
+        return pasted_text_to_lines(self.paste_box.toPlainText(), mode)
+
+    def apply_smart_split_to_paste(self) -> None:
+        lines = self.preview_pasted_lines()
+        if not lines:
+            self.append_fill_status("Paste Sinhala text first, then split the paragraph.")
+            return
+
+        with QSignalBlocker(self.paste_box):
+            self.paste_box.setPlainText("\n".join(lines))
+        self.update_fill_button()
+        self.update_line_numbers()
+        self.append_fill_status(f"Split paste into {len(lines)} lines.")
 
     def start_generation(self) -> None:
         if self.selected_input is None:
@@ -610,6 +840,47 @@ class MainWindow(QMainWindow):
 
         self.thread.start()
 
+    def start_ai_generation(self) -> None:
+        if self.selected_ai_input is None:
+            QMessageBox.warning(self, "No file selected", "Please import or drop an audio/video file first.")
+            return
+
+        api_key = self.ai_key_input.text().strip()
+        if not api_key:
+            self.append_ai_log("Paste your Gemini API key first.")
+            return
+
+        if self.ai_remember_check.isChecked():
+            self.settings.setValue("gemini_api_key", api_key)
+        else:
+            self.settings.remove("gemini_api_key")
+
+        self.ai_choose_audio_button.setEnabled(False)
+        self.ai_choose_video_button.setEnabled(False)
+        self.ai_drop_zone.setEnabled(False)
+        self.ai_key_input.setEnabled(False)
+        self.ai_remember_check.setEnabled(False)
+        self.ai_start_button.setEnabled(False)
+        self.ai_progress_bar.setValue(0)
+        self.append_ai_log("Starting AI caption generation...")
+
+        self.ai_thread = QThread()
+        self.ai_worker = AiCaptionWorker(self.selected_ai_input, api_key, DEFAULT_GEMINI_MODEL)
+        self.ai_worker.moveToThread(self.ai_thread)
+
+        self.ai_thread.started.connect(self.ai_worker.run)
+        self.ai_worker.log_message.connect(self.append_ai_log)
+        self.ai_worker.progress_changed.connect(self.ai_progress_bar.setValue)
+        self.ai_worker.finished.connect(self.on_ai_finished)
+        self.ai_worker.failed.connect(self.on_ai_failed)
+        self.ai_worker.finished.connect(self.ai_thread.quit)
+        self.ai_worker.failed.connect(self.ai_thread.quit)
+        self.ai_thread.finished.connect(self.ai_worker.deleteLater)
+        self.ai_thread.finished.connect(self.ai_thread.deleteLater)
+        self.ai_thread.finished.connect(self.reset_ai_worker_refs)
+
+        self.ai_thread.start()
+
     def create_filled_srt(self) -> None:
         if self.selected_srt is None:
             QMessageBox.warning(self, "No SRT selected", "Please choose a placeholder SRT first.")
@@ -620,6 +891,7 @@ class MainWindow(QMainWindow):
                 self.selected_srt,
                 self.paste_box.toPlainText(),
                 output_dir=DOWNLOADS_OUTPUT_DIR,
+                paste_mode=self.fill_mode_box.currentData(),
             )
         except PlaceholderError as error:
             QMessageBox.critical(self, "Could not fill SRT", str(error))
@@ -638,6 +910,11 @@ class MainWindow(QMainWindow):
     def append_log(self, message: str) -> None:
         self.log_box.appendPlainText(message)
         scrollbar = self.log_box.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def append_ai_log(self, message: str) -> None:
+        self.ai_log_box.appendPlainText(message)
+        scrollbar = self.ai_log_box.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     def on_finished(
@@ -682,9 +959,54 @@ class MainWindow(QMainWindow):
             return
         QMessageBox.critical(self, "Placeholder generation failed", message)
 
+    def on_ai_finished(
+        self,
+        subtitle_path: str,
+        subtitle_count: int,
+        duration_seconds: float,
+        warnings: list[str],
+    ) -> None:
+        self.ai_progress_bar.setValue(100)
+        self.append_ai_log(f"Done: {subtitle_path}")
+        self.append_ai_log(f"Subtitle blocks written: {subtitle_count}")
+        self.ai_estimate_label.setText(
+            f"Saved AI SRT: {subtitle_path}\nDuration: {duration_seconds:.1f}s"
+        )
+        self.selected_srt = Path(subtitle_path)
+        self.load_srt_block_count(self.selected_srt)
+        self.tabs.setCurrentIndex(1)
+        self.fill_status_label.setText(
+            f"Loaded AI SRT: {subtitle_path}\nCorrect Sinhala lines if needed, then create filled SRT."
+        )
+
+        for warning in warnings:
+            self.append_ai_log(f"Warning: {warning}")
+
+        self.reset_ai_controls()
+
+    def on_ai_failed(self, message: str) -> None:
+        self.append_ai_log("Error:")
+        self.append_ai_log(message)
+        self.reset_ai_controls()
+        if "FFmpeg is not installed" in message or "FFprobe is not installed" in message:
+            self.ai_estimate_label.setText(FFMPEG_INSTALL_MESSAGE)
+            self.append_ai_log("Install FFmpeg, then reopen SinhalaSTT and try again.")
+
+    def reset_ai_controls(self) -> None:
+        self.ai_choose_audio_button.setEnabled(True)
+        self.ai_choose_video_button.setEnabled(True)
+        self.ai_drop_zone.setEnabled(True)
+        self.ai_key_input.setEnabled(True)
+        self.ai_remember_check.setEnabled(True)
+        self.ai_start_button.setEnabled(self.selected_ai_input is not None)
+
     def reset_worker_refs(self) -> None:
         self.thread = None
         self.worker = None
+
+    def reset_ai_worker_refs(self) -> None:
+        self.ai_thread = None
+        self.ai_worker = None
 
 
 def main() -> None:

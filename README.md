@@ -2,17 +2,20 @@
 
 ![SinhalaSTT banner](assets/banner.png)
 
-**SinhalaSTT 0.1.0 beta** is a local/offline macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
+**SinhalaSTT 0.1.0 beta** is a macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
 
 ![SinhalaSTT 0.1.0 beta desktop app](assets/app-screenshot.png)
 
 _SinhalaSTT 0.1.0 beta desktop app_
 
-It does **not** transcribe Sinhala automatically. Instead, it creates timestamp placeholder `.srt` files that you can fill with Sinhala text from manual typing, Helakuru, or another source.
+It has two workflows:
 
 ```text
-audio/video file -> detect speech/silence -> placeholder SRT -> paste Sinhala lines -> filled SRT
+Offline: audio/video -> detect speech/silence -> placeholder SRT -> paste Sinhala lines -> filled SRT
+AI Captions: audio/video -> extract audio -> Gemini API -> Sinhala/English draft SRT
 ```
+
+The Create and Fill tabs are fully offline. The AI Captions tab is optional and requires your own Gemini API key.
 
 ## Features
 
@@ -21,8 +24,10 @@ audio/video file -> detect speech/silence -> placeholder SRT -> paste Sinhala li
 - Create `.srt` placeholder timing blocks.
 - Choose placeholder size: sentences, 1 word, 2 words, or 3 words.
 - Paste Sinhala text line-by-line into matching subtitle blocks.
+- Paste one Sinhala paragraph and split it automatically into sentence, 1-word, 2-word, or 3-word lines.
+- Generate an AI subtitle draft with Gemini Flash-Lite using your own API key.
 - Export filled `.srt` files.
-- Runs locally on macOS.
+- Runs as a local macOS app.
 
 ## Supported Inputs
 
@@ -82,9 +87,36 @@ Example:
 
 Line 1 replaces subtitle 1, line 2 replaces subtitle 2, line 3 stays unchanged, and line 4 replaces subtitle 4.
 
-## Important Limit
+### Smart Paste
 
-SinhalaSTT does not understand speech or language content. It estimates timing from audio volume and silence.
+If your Sinhala script is one paragraph, choose a paste split mode in the `Fill` tab:
+
+```text
+1 word, 2 words, 3 words, or Sentences
+```
+
+Then click `Split Paragraph`, or just create the filled SRT. Existing line breaks are respected, so manual line-by-line paste still works.
+
+### AI Captions
+
+The `AI Captions` tab can create a real subtitle draft using Gemini:
+
+1. Paste your Gemini API key.
+2. Choose whether to remember it locally.
+3. Import or drag an audio/video file.
+4. Click `Generate AI Captions`.
+
+Generated AI subtitle drafts save to:
+
+```text
+Downloads/
+```
+
+AI Captions sends extracted audio to Google Gemini using your API key. Your key is stored only in local macOS app settings if you enable `Remember locally`.
+
+## Important Limits
+
+Offline placeholder mode does not understand speech or language content. It estimates timing from audio volume and silence.
 
 This means:
 
@@ -95,6 +127,8 @@ This means:
 - long speech without pauses may become a long block
 
 Use it as a subtitle editing scaffold, then manually correct the final `.srt`.
+
+AI Captions can produce better text, but it is not fully offline and may still make Sinhala mistakes. Always review the generated `.srt`.
 
 ## Developer Setup
 
