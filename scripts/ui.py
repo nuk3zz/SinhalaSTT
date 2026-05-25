@@ -58,7 +58,7 @@ MODE_LABELS = {
 }
 
 APP_NAME = "SinhalaSTT"
-APP_VERSION = "0.1.0 beta"
+APP_VERSION = "0.2.1 beta"
 APP_TAGLINE = "Create editable Sinhala subtitle timing drafts from audio or video."
 GITHUB_URL = "https://github.com/nuk3zz/SinhalaSTT"
 FFMPEG_INSTALL_MESSAGE = (
@@ -172,10 +172,24 @@ QComboBox {
     background: #ffffff;
     border: 1px solid #d8dee8;
     border-radius: 9px;
-    padding: 7px;
+    padding: 7px 34px 7px 10px;
 }
 QComboBox:hover {
     border: 1px solid #8aa2c6;
+}
+QComboBox::drop-down {
+    width: 30px;
+    border: 0;
+    background: transparent;
+}
+QComboBox::down-arrow {
+    image: url("__CHEVRON_PATH__");
+    width: 14px;
+    height: 14px;
+    border: 0;
+}
+QComboBox::down-arrow:on {
+    top: 1px;
 }
 QLineEdit {
     color: #171b22;
@@ -1101,7 +1115,8 @@ def main() -> None:
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setWindowIcon(QIcon(str(resource_path("assets/icon-source.png"))))
-    app.setStyleSheet(APP_STYLE)
+    chevron_path = str(resource_path("assets/chevron-down.svg")).replace("\\", "/")
+    app.setStyleSheet(APP_STYLE.replace("__CHEVRON_PATH__", chevron_path))
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

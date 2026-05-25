@@ -1,4 +1,4 @@
-SinhalaSTT 0.1.0 beta
+SinhalaSTT 0.2.1 beta
 
 Install:
 1. Drag SinhalaSTT.app to Applications.

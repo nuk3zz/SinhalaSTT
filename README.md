@@ -2,11 +2,11 @@
 
 ![SinhalaSTT banner](assets/banner.png)
 
-**SinhalaSTT 0.1.0 beta** is a macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
+**SinhalaSTT 0.2.1 beta** is a macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
 
-![SinhalaSTT 0.1.0 beta desktop app](assets/app-screenshot.png)
+![SinhalaSTT 0.2.1 beta desktop app](assets/app-screenshot.png)
 
-_SinhalaSTT 0.1.0 beta desktop app_
+_SinhalaSTT 0.2.1 beta desktop app_
 
 It has two workflows:
 
@@ -184,7 +184,7 @@ dist/SinhalaSTT.app
 The first beta package is an unsigned macOS DMG:
 
 ```text
-SinhalaSTT-0.1.0-beta-macOS-arm64.dmg
+SinhalaSTT-0.2.1-beta-macOS-arm64.dmg
 ```
 
 Because it is unsigned and not notarized, macOS may require users to right-click the app and choose `Open` the first time.
