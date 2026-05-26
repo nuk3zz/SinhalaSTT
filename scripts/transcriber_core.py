@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 
@@ -71,6 +72,16 @@ class FillResult:
     replaced_count: int
     skipped_count: int
     extra_line_count: int
+    warnings: list[str]
+
+
+@dataclass(frozen=True)
+class DumpResult:
+    output_path: Path
+    block_count: int
+    source_line_count: int
+    skipped_blank_count: int
+    duration_per_block: float
     warnings: list[str]
 
 
@@ -458,6 +469,77 @@ def output_path_for_filled_srt(
 ) -> Path:
     base_dir = output_dir or srt_path.parent
     return base_dir / f"{srt_path.stem}{suffix}{srt_path.suffix}"
+
+
+def output_path_for_dump_srt(
+    output_dir: Path | None = None,
+    legacy: bool = False,
+) -> Path:
+    base_dir = output_dir or DOWNLOADS_OUTPUT_DIR
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    suffix = "fm" if legacy else "unicode"
+    return base_dir / f"SinhalaSTT_dump_{suffix}_{timestamp}.srt"
+
+
+def create_text_dump_srt(
+    lines: list[str],
+    output_path: Path,
+    duration_per_block: float = 1.0,
+) -> DumpResult:
+    if duration_per_block <= 0:
+        raise PlaceholderError("Dump subtitle duration must be more than 0 seconds.")
+
+    blocks: list[SubtitleBlock] = []
+    skipped_blank_count = 0
+
+    for line in lines:
+        text = line.strip()
+        if not text:
+            skipped_blank_count += 1
+            continue
+
+        start = len(blocks) * duration_per_block
+        blocks.append(
+            SubtitleBlock(
+                start=start,
+                end=start + duration_per_block,
+                text=text,
+            )
+        )
+
+    if not blocks:
+        raise PlaceholderError("Paste at least one non-empty text line before creating a Dump SRT.")
+
+    write_srt(blocks, output_path)
+
+    warnings = []
+    if skipped_blank_count:
+        warnings.append(f"Skipped {skipped_blank_count} blank lines.")
+
+    return DumpResult(
+        output_path=output_path,
+        block_count=len(blocks),
+        source_line_count=len(lines),
+        skipped_blank_count=skipped_blank_count,
+        duration_per_block=duration_per_block,
+        warnings=warnings,
+    )
+
+
+def create_dump_srt(
+    pasted_text: str,
+    paste_mode: str | None = None,
+    output_dir: Path | None = None,
+    duration_per_block: float = 1.0,
+    legacy: bool = False,
+) -> DumpResult:
+    lines = pasted_text_to_lines(pasted_text, paste_mode)
+    output_path = output_path_for_dump_srt(output_dir=output_dir, legacy=legacy)
+    return create_text_dump_srt(
+        lines,
+        output_path=output_path,
+        duration_per_block=duration_per_block,
+    )
 
 
 def fill_placeholder_srt(

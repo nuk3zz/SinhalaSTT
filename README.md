@@ -2,20 +2,22 @@
 
 ![SinhalaSTT banner](assets/banner.png)
 
-**SinhalaSTT 0.2.1 beta** is a macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
+**SinhalaSTT 0.2.3 beta** is a macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
 
-![SinhalaSTT 0.2.1 beta desktop app](assets/app-screenshot.png)
+![SinhalaSTT 0.2.3 beta desktop app](assets/app-screenshot.png)
 
-_SinhalaSTT 0.2.1 beta desktop app_
+_SinhalaSTT 0.2.3 beta desktop app_
 
-It has two workflows:
+It has four workflows:
 
 ```text
-Offline: audio/video -> detect speech/silence -> placeholder SRT -> paste Sinhala lines -> filled SRT
-AI Captions: audio/video -> extract audio -> Gemini API -> Sinhala/English draft SRT
+Create: audio/video -> detect speech/silence -> placeholder SRT
+Fill: placeholder SRT -> paste Sinhala lines -> filled Unicode or FM/DL SRT
+Dump: paste Sinhala lines -> fresh 1-second-per-line SRT
+AI Caption: audio/video -> extract audio -> Gemini API -> Sinhala/English draft SRT
 ```
 
-The Create and Fill tabs are fully offline. The AI Captions tab is optional and requires your own Gemini API key.
+The Create, Fill, and Dump tabs are fully offline. The AI Caption tab is optional and requires your own Gemini API key.
 
 ## Features
 
@@ -25,6 +27,7 @@ The Create and Fill tabs are fully offline. The AI Captions tab is optional and 
 - Choose placeholder size: sentences, 1 word, 2 words, or 3 words.
 - Paste Sinhala text line-by-line into matching subtitle blocks.
 - Paste one Sinhala paragraph and split it automatically into sentence, 1-word, 2-word, or 3-word lines.
+- Create a quick Dump SRT directly from pasted text, with each non-empty line becoming a 1-second subtitle block.
 - Convert Unicode Sinhala into FM/DL-compatible legacy font text for Photoshop and Premiere workflows.
 - Generate an AI subtitle draft with Gemini Flash-Lite using your own API key.
 - Export filled `.srt` files.
@@ -118,9 +121,19 @@ Use `Create Unicode SRT` for normal subtitles, or `Create FM/DL SRT` for legacy-
 
 The offline FM/DL conversion rules are based on the public FMAbhaya converter work by Malinthe Samarakoon, originally created by LTRL at the University of Colombo School of Computing.
 
-### AI Captions
+### Dump
 
-The `AI Captions` tab can create a real subtitle draft using Gemini:
+The `Dump` tab is useful when you already have Sinhala text but do not want to create timing placeholders first.
+
+1. Paste Sinhala text into the Unicode box.
+2. Keep existing lines, or split one paragraph into sentence, 1-word, 2-word, or 3-word lines.
+3. Click `Create Unicode Dump SRT` or `Create FM/DL Dump SRT`.
+
+Each non-empty line becomes one subtitle block. The first version uses simple 1-second timing per block, so you can manually adjust the timing later in Premiere, DaVinci Resolve, CapCut, or another editor.
+
+### AI Caption
+
+The `AI Caption` tab can create a real subtitle draft using Gemini:
 
 1. Paste your Gemini API key.
 2. Choose whether to remember it locally.
@@ -133,7 +146,7 @@ Generated AI subtitle drafts save to:
 Downloads/
 ```
 
-AI Captions sends extracted audio to Google Gemini using your API key. Your key is stored only in local macOS app settings if you enable `Remember locally`.
+AI Caption sends extracted audio to Google Gemini using your API key. Your key is stored only in local macOS app settings if you enable `Remember locally`.
 
 ## Important Limits
 
@@ -149,7 +162,7 @@ This means:
 
 Use it as a subtitle editing scaffold, then manually correct the final `.srt`.
 
-AI Captions can produce better text, but it is not fully offline and may still make Sinhala mistakes. Always review the generated `.srt`.
+AI Caption can produce better text, but it is not fully offline and may still make Sinhala mistakes. Always review the generated `.srt`.
 
 ## Developer Setup
 
@@ -205,7 +218,7 @@ dist/SinhalaSTT.app
 The first beta package is an unsigned macOS DMG:
 
 ```text
-SinhalaSTT-0.2.1-beta-macOS-arm64.dmg
+SinhalaSTT-0.2.3-beta-macOS-arm64.dmg
 ```
 
 Because it is unsigned and not notarized, macOS may require users to right-click the app and choose `Open` the first time.

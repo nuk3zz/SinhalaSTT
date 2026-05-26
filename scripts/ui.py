@@ -42,6 +42,7 @@ from transcriber_core import (
     DESKTOP_CACHE_AUDIO_DIR,
     DOWNLOADS_OUTPUT_DIR,
     PlaceholderError,
+    create_dump_srt,
     fill_placeholder_srt,
     find_tool,
     generate_placeholder_srt,
@@ -59,7 +60,7 @@ MODE_LABELS = {
 }
 
 APP_NAME = "SinhalaSTT"
-APP_VERSION = "0.2.1 beta"
+APP_VERSION = "0.2.3 beta"
 APP_TAGLINE = "Create editable Sinhala subtitle timing drafts from audio or video."
 GITHUB_URL = "https://github.com/nuk3zz/SinhalaSTT"
 FFMPEG_INSTALL_MESSAGE = (
@@ -507,7 +508,8 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.build_create_tab(), "Create")
         self.tabs.addTab(self.build_fill_tab(), "Fill")
-        self.tabs.addTab(self.build_ai_tab(), "AI Captions")
+        self.tabs.addTab(self.build_dump_tab(), "Dump")
+        self.tabs.addTab(self.build_ai_tab(), "AI Caption")
 
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
@@ -700,6 +702,112 @@ class MainWindow(QMainWindow):
         layout.addLayout(label_row)
         layout.addLayout(paste_row)
         layout.addWidget(self.fill_status_label)
+
+        tab = QWidget()
+        tab.setLayout(layout)
+        return tab
+
+    def build_dump_tab(self) -> QWidget:
+        self.dump_intro_label = QLabel(
+            "Create a fresh SRT from pasted text only. Each subtitle block is 1 second long."
+        )
+        self.dump_intro_label.setObjectName("PathLabel")
+        self.dump_intro_label.setWordWrap(True)
+
+        self.dump_unicode_button = QPushButton("Create Unicode Dump SRT")
+        self.dump_unicode_button.setEnabled(False)
+        self.dump_unicode_button.clicked.connect(self.create_dump_unicode_srt)
+
+        self.dump_convert_fm_button = QPushButton("Convert to FM/DL")
+        self.dump_convert_fm_button.clicked.connect(self.convert_dump_text_to_fm)
+
+        self.dump_copy_fm_button = QPushButton("Copy FM/DL Text")
+        self.dump_copy_fm_button.setEnabled(False)
+        self.dump_copy_fm_button.clicked.connect(self.copy_dump_fm_text)
+
+        self.dump_fm_button = QPushButton("Create FM/DL Dump SRT")
+        self.dump_fm_button.setEnabled(False)
+        self.dump_fm_button.clicked.connect(self.create_dump_fm_srt)
+
+        self.dump_mode_box = QComboBox()
+        self.dump_mode_box.addItem("Keep pasted lines", "keep")
+        for mode, label in MODE_LABELS.items():
+            self.dump_mode_box.addItem(f"Split paragraph: {label}", mode)
+        self.dump_mode_box.currentIndexChanged.connect(self.update_dump_line_numbers)
+
+        self.dump_split_button = QPushButton("Split Paragraph")
+        self.dump_split_button.clicked.connect(self.apply_dump_split)
+
+        self.dump_paste_box = QPlainTextEdit()
+        self.dump_paste_box.setPlaceholderText(
+            "Paste Sinhala text here.\n"
+            "Use line breaks for manual blocks, or split one paragraph automatically."
+        )
+        self.dump_paste_box.textChanged.connect(self.update_dump_buttons)
+        self.dump_paste_box.textChanged.connect(self.update_dump_line_numbers)
+        self.dump_paste_box.textChanged.connect(self.clear_dump_fm_output)
+        self.dump_paste_box.verticalScrollBar().valueChanged.connect(self.sync_dump_line_number_scroll)
+
+        self.dump_fm_box = QPlainTextEdit()
+        self.dump_fm_box.setReadOnly(True)
+        self.dump_fm_box.setPlaceholderText(
+            "FM/DL converted text appears here.\n"
+            "Use this for legacy Sinhala fonts."
+        )
+        self.dump_fm_box.verticalScrollBar().valueChanged.connect(self.sync_dump_fm_scroll_to_unicode)
+
+        self.dump_line_numbers = QPlainTextEdit()
+        self.dump_line_numbers.setObjectName("LineNumbers")
+        self.dump_line_numbers.setReadOnly(True)
+        self.dump_line_numbers.setFocusPolicy(Qt.NoFocus)
+        self.dump_line_numbers.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.dump_line_numbers.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.dump_line_numbers.setPlainText("001")
+
+        self.dump_status_label = QLabel("Dump SRT saves to Downloads. Timing: 1 second per non-empty line.")
+        self.dump_status_label.setObjectName("PathLabel")
+        self.dump_status_label.setWordWrap(True)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addWidget(self.dump_unicode_button)
+        button_row.addWidget(self.dump_fm_button)
+        button_row.addStretch(1)
+
+        split_row = QHBoxLayout()
+        split_row.setSpacing(8)
+        split_row.addWidget(QLabel("Paste:"))
+        split_row.addWidget(self.dump_mode_box, 1)
+        split_row.addWidget(self.dump_split_button)
+        split_row.addWidget(self.dump_convert_fm_button)
+        split_row.addWidget(self.dump_copy_fm_button)
+
+        unicode_label = QLabel("Unicode Sinhala")
+        unicode_label.setObjectName("SmallNote")
+        fm_label = QLabel("FM/DL Legacy Text")
+        fm_label.setObjectName("SmallNote")
+
+        label_row = QHBoxLayout()
+        label_row.setSpacing(8)
+        label_row.addSpacing(60)
+        label_row.addWidget(unicode_label)
+        label_row.addWidget(fm_label)
+
+        paste_row = QHBoxLayout()
+        paste_row.setSpacing(6)
+        paste_row.addWidget(self.dump_line_numbers)
+        paste_row.addWidget(self.dump_paste_box, 1)
+        paste_row.addWidget(self.dump_fm_box, 1)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        layout.addWidget(self.dump_intro_label)
+        layout.addLayout(button_row)
+        layout.addLayout(split_row)
+        layout.addLayout(label_row)
+        layout.addLayout(paste_row)
+        layout.addWidget(self.dump_status_label)
 
         tab = QWidget()
         tab.setLayout(layout)
@@ -991,6 +1099,128 @@ class MainWindow(QMainWindow):
 
         QApplication.clipboard().setText(text)
         self.append_fill_status("FM/DL text copied to clipboard.")
+
+    def update_dump_buttons(self) -> None:
+        has_text = bool(self.dump_paste_box.toPlainText().strip())
+        self.dump_unicode_button.setEnabled(has_text)
+        self.dump_fm_button.setEnabled(has_text)
+
+    def preview_dump_lines(self) -> list[str]:
+        mode = self.dump_mode_box.currentData() if hasattr(self, "dump_mode_box") else "keep"
+        return pasted_text_to_lines(self.dump_paste_box.toPlainText(), mode)
+
+    def update_dump_line_numbers(self) -> None:
+        pasted_line_count = max(1, len(self.preview_dump_lines()))
+        numbers = "\n".join(f"{number:03d}" for number in range(1, pasted_line_count + 1))
+
+        with QSignalBlocker(self.dump_line_numbers):
+            self.dump_line_numbers.setPlainText(numbers)
+        self.sync_dump_line_number_scroll(self.dump_paste_box.verticalScrollBar().value())
+
+    def sync_dump_line_number_scroll(self, value: int) -> None:
+        self.dump_line_numbers.verticalScrollBar().setValue(value)
+        self.dump_fm_box.verticalScrollBar().setValue(value)
+
+    def sync_dump_fm_scroll_to_unicode(self, value: int) -> None:
+        self.dump_paste_box.verticalScrollBar().setValue(value)
+        self.dump_line_numbers.verticalScrollBar().setValue(value)
+
+    def append_dump_status(self, message: str) -> None:
+        self.dump_status_label.setText(message)
+
+    def apply_dump_split(self) -> None:
+        mode = self.dump_mode_box.currentData()
+        lines = pasted_text_to_lines(
+            self.dump_paste_box.toPlainText(),
+            mode,
+            preserve_existing_lines=False,
+        )
+        if not lines:
+            self.append_dump_status("Paste Sinhala text first, then split the paragraph.")
+            return
+
+        with QSignalBlocker(self.dump_paste_box):
+            self.dump_paste_box.setPlainText("\n".join(lines))
+        self.update_dump_buttons()
+        self.update_dump_line_numbers()
+        self.append_dump_status(f"Split paste into {len(lines)} lines.")
+
+    def clear_dump_fm_output(self) -> None:
+        if not hasattr(self, "dump_fm_box"):
+            return
+        with QSignalBlocker(self.dump_fm_box):
+            self.dump_fm_box.clear()
+        self.dump_copy_fm_button.setEnabled(False)
+
+    def convert_dump_text_to_fm(self) -> str:
+        lines = self.preview_dump_lines()
+        if not lines:
+            self.append_dump_status("Paste Sinhala Unicode text first.")
+            return ""
+
+        source_text = "\n".join(lines)
+        result = unicode_to_fm(source_text)
+        self.dump_fm_box.setPlainText(result.text)
+        self.dump_copy_fm_button.setEnabled(bool(result.text))
+
+        status = f"Converted {len(lines)} lines to FM/DL legacy text."
+        if result.warnings:
+            status += "\n" + "\n".join(f"Note: {warning}" for warning in result.warnings)
+        self.append_dump_status(status)
+        return result.text
+
+    def copy_dump_fm_text(self) -> None:
+        text = self.dump_fm_box.toPlainText()
+        if not text:
+            text = self.convert_dump_text_to_fm()
+        if not text:
+            return
+
+        QApplication.clipboard().setText(text)
+        self.append_dump_status("FM/DL text copied to clipboard.")
+
+    def create_dump_unicode_srt(self) -> None:
+        try:
+            result = create_dump_srt(
+                self.dump_paste_box.toPlainText(),
+                paste_mode=self.dump_mode_box.currentData(),
+                output_dir=DOWNLOADS_OUTPUT_DIR,
+            )
+        except PlaceholderError as error:
+            QMessageBox.critical(self, "Could not create Dump SRT", str(error))
+            return
+
+        status_lines = [
+            f"Saved Unicode Dump SRT: {result.output_path}",
+            f"Blocks: {result.block_count} | Duration: {result.duration_per_block:.1f}s each",
+        ]
+        status_lines.extend(f"Note: {warning}" for warning in result.warnings)
+        self.append_dump_status("\n".join(status_lines))
+
+    def create_dump_fm_srt(self) -> None:
+        converted_text = self.dump_fm_box.toPlainText()
+        if not converted_text:
+            converted_text = self.convert_dump_text_to_fm()
+        if not converted_text:
+            return
+
+        try:
+            result = create_dump_srt(
+                converted_text,
+                paste_mode="keep",
+                output_dir=DOWNLOADS_OUTPUT_DIR,
+                legacy=True,
+            )
+        except PlaceholderError as error:
+            QMessageBox.critical(self, "Could not create FM/DL Dump SRT", str(error))
+            return
+
+        status_lines = [
+            f"Saved FM/DL Dump SRT: {result.output_path}",
+            f"Blocks: {result.block_count} | Duration: {result.duration_per_block:.1f}s each",
+        ]
+        status_lines.extend(f"Note: {warning}" for warning in result.warnings)
+        self.append_dump_status("\n".join(status_lines))
 
     def start_generation(self) -> None:
         if self.selected_input is None:
