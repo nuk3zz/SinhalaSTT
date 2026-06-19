@@ -38,11 +38,12 @@ from ai_captions_core import (
 )
 from font_converter import unicode_to_fm
 from transcriber_core import (
+    CACHE_AUDIO_DIR,
     DEFAULT_PLACEHOLDER_MODE,
-    DESKTOP_CACHE_AUDIO_DIR,
     DOWNLOADS_OUTPUT_DIR,
     PlaceholderError,
     create_dump_srt,
+    ffmpeg_install_hint,
     fill_placeholder_srt,
     find_tool,
     generate_placeholder_srt,
@@ -65,7 +66,7 @@ APP_TAGLINE = "Create editable Sinhala subtitle timing drafts from audio or vide
 GITHUB_URL = "https://github.com/nuk3zz/SinhalaSTT"
 FFMPEG_INSTALL_MESSAGE = (
     "FFmpeg setup needed: SinhalaSTT can open, but SRT creation needs FFmpeg. "
-    "Install it once with Homebrew: brew install ffmpeg"
+    + ffmpeg_install_hint()
 )
 
 SUPPORTED_AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".aiff", ".aif"}
@@ -410,7 +411,7 @@ class PlaceholderWorker(QObject):
             result = generate_placeholder_srt(
                 self.input_path,
                 mode=self.mode,
-                audio_dir=DESKTOP_CACHE_AUDIO_DIR,
+                audio_dir=CACHE_AUDIO_DIR,
                 output_dir=DOWNLOADS_OUTPUT_DIR,
                 mp3_only=False,
                 log=self.log_message.emit,
@@ -446,7 +447,7 @@ class AiCaptionWorker(QObject):
                 self.input_path,
                 api_key=self.api_key,
                 model=self.model,
-                audio_dir=DESKTOP_CACHE_AUDIO_DIR,
+                audio_dir=CACHE_AUDIO_DIR,
                 output_dir=DOWNLOADS_OUTPUT_DIR,
                 log=self.log_message.emit,
                 progress=self.progress_changed.emit,
@@ -569,7 +570,7 @@ class MainWindow(QMainWindow):
         self.log_box.setMaximumHeight(110)
         self.log_box.setPlaceholderText("Logs...")
 
-        self.output_label = QLabel(f"Saves to Downloads. WAV cache: {DESKTOP_CACHE_AUDIO_DIR}")
+        self.output_label = QLabel(f"Saves to Downloads. WAV cache: {CACHE_AUDIO_DIR}")
         self.output_label.setObjectName("PathLabel")
         self.output_label.setWordWrap(True)
 

@@ -1,0 +1,117 @@
+name: Build Windows App
+
+# Builds the portable Windows version of SinhalaSTT.
+#
+# You can run this:
+#   - automatically, on every push to main
+#   - automatically, when you push a version tag like v0.2.3
+#   - manually, from the GitHub "Actions" tab (Run workflow button)
+#
+# The finished app is uploaded as a downloadable .zip (an "artifact").
+# When you push a version tag, it is also attached to a GitHub Release.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pillow
+
+      - name: Read app version
+        id: appversion
+        shell: pwsh
+        run: |
+          $ui = Get-Content scripts/ui.py -Raw
+          $m = [regex]::Match($ui, 'APP_VERSION\s*=\s*"([^"]+)"')
+          $version = if ($m.Success) { $m.Groups[1].Value } else { "dev" }
+          $safe = $version -replace '\s+', '-'
+          "version=$safe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "App version: $safe"
+
+      - name: Download and stage bundled FFmpeg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Write-Host "Downloading FFmpeg from $url"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_extracted -Force
+
+          New-Item -ItemType Directory -Force -Path vendor/ffmpeg | Out-Null
+
+          $ffmpeg = Get-ChildItem -Path ffmpeg_extracted -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Path ffmpeg_extracted -Recurse -Filter ffprobe.exe | Select-Object -First 1
+          if (-not $ffmpeg -or -not $ffprobe) {
+            throw "Could not find ffmpeg.exe / ffprobe.exe in the downloaded archive."
+          }
+          Copy-Item $ffmpeg.FullName vendor/ffmpeg/ffmpeg.exe -Force
+          Copy-Item $ffprobe.FullName vendor/ffmpeg/ffprobe.exe -Force
+
+          # Keep FFmpeg's license alongside the binaries (GPL compliance).
+          $license = Get-ChildItem -Path ffmpeg_extracted -Recurse -Filter LICENSE* | Select-Object -First 1
+          if ($license) { Copy-Item $license.FullName vendor/ffmpeg/FFmpeg-LICENSE.txt -Force }
+
+          Write-Host "Bundled FFmpeg:"
+          Get-ChildItem vendor/ffmpeg
+
+      - name: Create Windows .ico icon
+        shell: pwsh
+        run: |
+          python -c "from PIL import Image; Image.open('assets/icon-source.png').convert('RGBA').save('assets/SinhalaSTT.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)]); print('Wrote assets/SinhalaSTT.ico')"
+
+      - name: Build the app with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm packaging/windows/SinhalaSTT.spec
+
+      - name: Add readme and license into the app folder
+        shell: pwsh
+        run: |
+          Copy-Item packaging/windows/README-WINDOWS.txt dist/SinhalaSTT/README.txt -Force
+          if (Test-Path vendor/ffmpeg/FFmpeg-LICENSE.txt) {
+            Copy-Item vendor/ffmpeg/FFmpeg-LICENSE.txt dist/SinhalaSTT/FFmpeg-LICENSE.txt -Force
+          }
+
+      - name: Zip the portable app
+        shell: pwsh
+        run: |
+          $zip = "SinhalaSTT-${{ steps.appversion.outputs.version }}-Windows-x64.zip"
+          # Zip the folder itself so it unpacks into a tidy SinhalaSTT\ folder.
+          Compress-Archive -Path dist/SinhalaSTT -DestinationPath $zip -Force
+          "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Created $zip"
+        id: zip
+
+      - name: Upload the app as a downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinhalaSTT-Windows-x64
+          path: ${{ steps.zip.outputs.zip }}
+
+      - name: Attach to GitHub Release (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.zip.outputs.zip }}

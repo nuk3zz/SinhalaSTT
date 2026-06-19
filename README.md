@@ -69,6 +69,25 @@ The app does not download or install anything automatically. If FFmpeg is missin
 brew install ffmpeg
 ```
 
+## Windows App
+
+The Windows version is a portable folder. Users do **not** need Python, FFmpeg,
+or any developer tools — FFmpeg is bundled inside the app.
+
+1. Download `SinhalaSTT-<version>-Windows-x64.zip`.
+2. Unzip it anywhere.
+3. Open the `SinhalaSTT` folder and double-click `SinhalaSTT.exe`.
+
+Because this beta is not code-signed, Windows SmartScreen may show a warning the
+first time. Choose `More info` -> `Run anyway`.
+
+Generated `.srt` files save to `Downloads`. Temporary WAV files go to the system
+Temp folder. The Create, Fill, and Dump tabs work fully offline.
+
+The Windows app is built automatically by GitHub Actions. See
+[`packaging/windows/BUILD-WINDOWS.md`](packaging/windows/BUILD-WINDOWS.md) for how
+to produce a build (no Windows PC required).
+
 ## How To Use
 
 1. Open `SinhalaSTT`.

@@ -4,9 +4,15 @@ __pycache__/
 
 build/
 dist/
-*.spec
 *.dmg
 *.app/
+
+# Windows build outputs and downloaded/generated artifacts
+*.exe
+*.zip
+vendor/
+ffmpeg_extracted/
+assets/SinhalaSTT.ico
 
 output/audio/*.wav
 subtitles/*.srt

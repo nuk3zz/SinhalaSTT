@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from transcriber_core import (
+    CACHE_AUDIO_DIR,
     DOWNLOADS_OUTPUT_DIR,
     LogCallback,
     PlaceholderError,
@@ -305,7 +306,7 @@ def generate_ai_captions_srt(
         raise AiCaptionError(f"Input file not found: {resolved_input}")
 
     output_name = make_safe_output_name(resolved_input)
-    audio_output_dir = audio_dir or (Path.home() / "Desktop" / "Cache" / "temporary wav")
+    audio_output_dir = audio_dir or CACHE_AUDIO_DIR
 
     progress(10)
     log("Preparing audio with FFmpeg...")

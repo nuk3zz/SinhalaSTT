@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+
+IS_WINDOWS = os.name == "nt"
+IS_MACOS = sys.platform == "darwin"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_AUDIO_DIR = PROJECT_ROOT / "output" / "audio"
@@ -16,7 +22,11 @@ PROJECT_SUBTITLES_DIR = PROJECT_ROOT / "subtitles"
 DOCUMENTS_TRANSCRIBE_DIR = Path.home() / "Documents" / "Transcribe"
 DOCUMENTS_AUDIO_DIR = DOCUMENTS_TRANSCRIBE_DIR / "audio"
 DOCUMENTS_OUTPUT_DIR = DOCUMENTS_TRANSCRIBE_DIR / "output"
-DESKTOP_CACHE_AUDIO_DIR = Path.home() / "Desktop" / "Cache" / "temporary wav"
+# Temporary WAV files used only during processing. A real temp folder is used so
+# the app never writes into the user's Desktop and works the same on every OS.
+CACHE_AUDIO_DIR = Path(tempfile.gettempdir()) / "SinhalaSTT" / "temporary wav"
+# Kept as an alias so older imports keep working.
+DESKTOP_CACHE_AUDIO_DIR = CACHE_AUDIO_DIR
 DOWNLOADS_OUTPUT_DIR = Path.home() / "Downloads"
 
 DEFAULT_PLACEHOLDER_MODE = "sentence"
@@ -97,18 +107,66 @@ def default_progress(_value: int) -> None:
     return
 
 
-def check_ffmpeg() -> None:
-    if ffmpeg_path() is None or ffprobe_path() is None:
-        raise PlaceholderError(
-            "FFmpeg is not installed or not available. Install it with: brew install ffmpeg"
+def ffmpeg_install_hint() -> str:
+    """Platform-specific guidance shown when FFmpeg cannot be found."""
+    if IS_WINDOWS:
+        # The Windows build ships FFmpeg inside the app, so this should be rare.
+        return (
+            "FFmpeg could not be found. The Windows version of SinhalaSTT normally "
+            "includes FFmpeg automatically. Please re-download the full app folder "
+            "and keep all files together."
         )
+    if IS_MACOS:
+        return "FFmpeg is not installed. Install it once with Homebrew: brew install ffmpeg"
+    return "FFmpeg is not installed. Please install FFmpeg using your system package manager."
+
+
+def bundled_bin_dirs() -> list[Path]:
+    """Folders that may contain ffmpeg/ffprobe shipped alongside the app."""
+    dirs: list[Path] = []
+
+    # When packaged by PyInstaller, binaries live next to the launcher and/or
+    # inside the extracted resource folder (sys._MEIPASS).
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        dirs.append(Path(meipass) / "ffmpeg")
+        dirs.append(Path(meipass))
+
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        dirs.append(exe_dir / "ffmpeg")
+        dirs.append(exe_dir)
+
+    # Development convenience: a vendored copy inside the repo.
+    dirs.append(PROJECT_ROOT / "vendor" / "ffmpeg")
+
+    return dirs
+
+
+def _executable_name(name: str) -> str:
+    return f"{name}.exe" if IS_WINDOWS else name
+
+
+def check_ffmpeg() -> None:
+    if find_tool("ffmpeg") is None or find_tool("ffprobe") is None:
+        raise PlaceholderError(ffmpeg_install_hint())
 
 
 def find_tool(name: str) -> str | None:
+    exe_name = _executable_name(name)
+
+    # 1. Prefer a copy bundled with the app (no install required for the user).
+    for directory in bundled_bin_dirs():
+        candidate = directory / exe_name
+        if candidate.exists():
+            return str(candidate)
+
+    # 2. Fall back to anything already on the system PATH.
     found = shutil.which(name)
     if found:
         return found
 
+    # 3. Finally, check the usual macOS/Linux install locations.
     for path in (
         Path("/opt/homebrew/bin") / name,
         Path("/usr/local/bin") / name,
@@ -123,19 +181,27 @@ def find_tool(name: str) -> str | None:
 def ffmpeg_path() -> str:
     path = find_tool("ffmpeg")
     if path is None:
-        raise PlaceholderError(
-            "FFmpeg is not installed or not available. Install it with: brew install ffmpeg"
-        )
+        raise PlaceholderError(ffmpeg_install_hint())
     return path
 
 
 def ffprobe_path() -> str:
     path = find_tool("ffprobe")
     if path is None:
-        raise PlaceholderError(
-            "FFprobe is not installed or not available. Install FFmpeg with: brew install ffmpeg"
-        )
+        raise PlaceholderError(ffmpeg_install_hint())
     return path
+
+
+def subprocess_flags() -> dict:
+    """Keyword args that stop a console window flashing on Windows."""
+    if not IS_WINDOWS:
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
 
 
 def make_safe_output_name(input_file: Path) -> str:
@@ -162,7 +228,7 @@ def ensure_input_file(input_file: Path, mp3_only: bool = False) -> None:
 
 
 def run_command(command: list[str], error_message: str) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, text=True, **subprocess_flags())
     if result.returncode != 0:
         raise PlaceholderError(error_message + "\n\n" + result.stderr.strip())
     return result
@@ -238,7 +304,7 @@ def detect_silences(
     ]
 
     log(f"Detecting speech and silence ({min_silence_duration:.2f}s pauses)...")
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, text=True, **subprocess_flags())
     if result.returncode != 0:
         raise PlaceholderError("Could not analyze speech/silence timing.\n\n" + result.stderr.strip())
 
@@ -298,7 +364,7 @@ def measure_region_volume(audio_path: Path, region: SpeechRegion) -> RegionVolum
         "null",
         "-",
     ]
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, text=True, **subprocess_flags())
     if result.returncode != 0:
         return RegionVolume(mean_volume=None, max_volume=None)
 
