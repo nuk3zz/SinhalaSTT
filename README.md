@@ -19,6 +19,13 @@ AI Caption: audio/video -> extract audio -> Gemini API -> Sinhala/English draft 
 
 The Create, Fill, and Dump tabs are fully offline. The AI Caption tab is optional and requires your own Gemini API key.
 
+## Download
+
+Get the latest build from the [Releases page](https://github.com/nuk3zz/SinhalaSTT/releases/latest):
+
+- **Windows:** [`SinhalaSTT-0.2.3-beta-Windows-x64.zip`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v0.2.3-beta/SinhalaSTT-0.2.3-beta-Windows-x64.zip) — portable, no install needed, FFmpeg included.
+- **macOS (Apple Silicon):** [`SinhalaSTT-0.2.3-beta-macOS-arm64.dmg`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v0.2.3-beta/SinhalaSTT-0.2.3-beta-macOS-arm64.dmg) — requires FFmpeg via `brew install ffmpeg`.
+
 ## Features
 
 - Import audio or video files.
@@ -74,7 +81,7 @@ brew install ffmpeg
 The Windows version is a portable folder. Users do **not** need Python, FFmpeg,
 or any developer tools — FFmpeg is bundled inside the app.
 
-1. Download `SinhalaSTT-<version>-Windows-x64.zip`.
+1. Download [`SinhalaSTT-0.2.3-beta-Windows-x64.zip`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v0.2.3-beta/SinhalaSTT-0.2.3-beta-Windows-x64.zip).
 2. Unzip it anywhere.
 3. Open the `SinhalaSTT` folder and double-click `SinhalaSTT.exe`.
 
