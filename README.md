@@ -2,249 +2,119 @@
 
 ![SinhalaSTT banner](assets/banner.png)
 
-**SinhalaSTT 0.2.3 beta** is a macOS tool for creating editable Sinhala subtitle timing drafts from audio or video.
+**SinhalaSTT 1.0** is a simple desktop tool for making Sinhala or English subtitle
+(`.srt`) files. It runs on Windows and macOS.
 
-![SinhalaSTT 0.2.3 beta desktop app](assets/app-screenshot.png)
-
-_SinhalaSTT 0.2.3 beta desktop app_
-
-It has four workflows:
+It has three tools:
 
 ```text
-Create: audio/video -> detect speech/silence -> placeholder SRT
-Fill: placeholder SRT -> paste Sinhala lines -> filled Unicode or FM/DL SRT
-Dump: paste Sinhala lines -> fresh 1-second-per-line SRT
-AI Caption: audio/video -> extract audio -> Gemini API -> Sinhala/English draft SRT
+Text  -> Subtitles : paste or open a script, pick a split, get an SRT
+Audio -> Subtitles : rough timing from audio (experimental), optionally filled with your script
+AI Caption         : optional online transcription with your own Gemini API key
 ```
 
-The Create, Fill, and Dump tabs are fully offline. The AI Caption tab is optional and requires your own Gemini API key.
+When the text is **Sinhala Unicode**, SinhalaSTT automatically also saves an
+**FM/DL legacy-font** version for Photoshop / Premiere workflows. English text just
+makes one normal `.srt`. The Text and Audio tools work fully offline; AI Caption is
+the only feature that uses the internet.
 
 ## Download
 
 Get the latest build from the [Releases page](https://github.com/nuk3zz/SinhalaSTT/releases/latest):
 
-- **Windows:** [`SinhalaSTT-0.2.3-beta-Windows-x64.zip`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v0.2.3-beta/SinhalaSTT-0.2.3-beta-Windows-x64.zip) — portable, no install needed, FFmpeg included.
-- **macOS (Apple Silicon):** [`SinhalaSTT-0.2.3-beta-macOS-arm64.dmg`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v0.2.3-beta/SinhalaSTT-0.2.3-beta-macOS-arm64.dmg) — requires FFmpeg via `brew install ffmpeg`.
+- **Windows:** `SinhalaSTT-1.0-Windows-x64.zip` — portable, no install needed,
+  FFmpeg is already bundled inside. Unzip and double-click `SinhalaSTT.exe`.
+- **macOS (Apple Silicon):** `SinhalaSTT-...-macOS-arm64.dmg` — needs FFmpeg via
+  `brew install ffmpeg`.
 
-## Features
+Because the app is not code-signed, the first launch may show a warning
+(Windows SmartScreen: `More info` -> `Run anyway`; macOS: right-click -> `Open`).
 
-- Import audio or video files.
-- Drag and drop files into the app.
-- Create `.srt` placeholder timing blocks.
-- Choose placeholder size: sentences, 1 word, 2 words, or 3 words.
-- Paste Sinhala text line-by-line into matching subtitle blocks.
-- Paste one Sinhala paragraph and split it automatically into sentence, 1-word, 2-word, or 3-word lines.
-- Create a quick Dump SRT directly from pasted text, with each non-empty line becoming a 1-second subtitle block.
-- Convert Unicode Sinhala into FM/DL-compatible legacy font text for Photoshop and Premiere workflows.
-- Generate an AI subtitle draft with Gemini Flash-Lite using your own API key.
-- Export filled `.srt` files.
-- Runs as a local macOS app.
+## The three tools
 
-## Supported Inputs
+### 1. Text → Subtitles
+1. Paste your script, or click **Open File** to load a `.pdf`, `.docx`, or `.txt`.
+2. Choose how to split it: **Sentences / 1 word / 2 words / 3 words**.
+3. Optionally set how long each line lasts (default 1 second).
+4. Click **Create Subtitles**.
 
-```text
-MP3, WAV, M4A, AAC, FLAC, AIFF, MP4, MOV, M4V, MKV, AVI, WEBM
-```
+English text saves one Unicode `.srt`. Sinhala text saves **two** files: a Unicode
+`.srt` and an FM/DL legacy-font `.srt`. Everything goes to your `Downloads` folder.
 
-## macOS App
+### 2. Audio → Subtitles (experimental)
+1. Drag in (or import) an audio/video file.
+2. Choose a split size.
+3. *Optional:* paste or open your script to fill in the words.
+4. Click **Create Subtitles from Audio**.
 
-The packaged app is named:
+It listens for pauses to build timed blocks. With a script, your words are dropped
+onto those time slots (Sinhala also gets an FM/DL file). With no script, you get
+blank timed blocks to fill later. **Timing is approximate** — treat it as a starting
+scaffold and fine-tune in your video editor.
 
-```text
-SinhalaSTT.app
-```
+### 3. AI Caption
+1. Paste your Google Gemini API key (optionally remember it locally).
+2. Import or drag an audio/video file.
+3. Click **Generate AI Captions**.
 
-Generated placeholder and filled `.srt` files save to:
+The extracted audio is sent to Google Gemini using your key, and a draft `.srt` is
+saved to `Downloads`. Always review the result — AI can make Sinhala mistakes.
 
-```text
-Downloads/
-```
-
-Temporary converted WAV files save to:
-
-```text
-Desktop/Cache/temporary wav/
-```
-
-### FFmpeg Requirement
-
-SinhalaSTT needs FFmpeg to read audio and video files.
-
-The app does not download or install anything automatically. If FFmpeg is missing, SinhalaSTT opens normally and shows a setup note. Install FFmpeg once with:
-
-```bash
-brew install ffmpeg
-```
-
-## Windows App
-
-The Windows version is a portable folder. Users do **not** need Python, FFmpeg,
-or any developer tools — FFmpeg is bundled inside the app.
-
-1. Download [`SinhalaSTT-0.2.3-beta-Windows-x64.zip`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v0.2.3-beta/SinhalaSTT-0.2.3-beta-Windows-x64.zip).
-2. Unzip it anywhere.
-3. Open the `SinhalaSTT` folder and double-click `SinhalaSTT.exe`.
-
-Because this beta is not code-signed, Windows SmartScreen may show a warning the
-first time. Choose `More info` -> `Run anyway`.
-
-Generated `.srt` files save to `Downloads`. Temporary WAV files go to the system
-Temp folder. The Create, Fill, and Dump tabs work fully offline.
-
-The Windows app is built automatically by GitHub Actions. See
-[`packaging/windows/BUILD-WINDOWS.md`](packaging/windows/BUILD-WINDOWS.md) for how
-to produce a build (no Windows PC required).
-
-## How To Use
-
-1. Open `SinhalaSTT`.
-2. Drag an audio/video file into the app, or use `Import Audio` / `Import MP4/Video`.
-3. Choose a placeholder size.
-4. Click `Create SRT`.
-5. Paste Sinhala lines in the `Fill` tab.
-6. Click `Create Filled SRT`.
-
-Blank pasted lines skip matching placeholders.
-
-Example:
+## Supported inputs
 
 ```text
-මම අද
-කඩේට
-
-ඇත්තටම
+Audio/Video : MP3, WAV, M4A, AAC, FLAC, AIFF, MP4, MOV, M4V, MKV, AVI, WEBM
+Script files: PDF, DOCX, TXT
 ```
 
-Line 1 replaces subtitle 1, line 2 replaces subtitle 2, line 3 stays unchanged, and line 4 replaces subtitle 4.
+## FM/DL legacy fonts
 
-### Smart Paste
-
-If your Sinhala script is one paragraph, choose a paste split mode in the `Fill` tab:
-
-```text
-1 word, 2 words, 3 words, or Sentences
-```
-
-Then click `Split Paragraph`, or just create the filled SRT. Existing line breaks are respected, so manual line-by-line paste still works.
-
-### FM/DL Legacy Font Output
-
-The `Fill` tab can also convert normal Sinhala Unicode into FM/DL-compatible legacy text. This legacy text may look like gibberish in a plain text editor, but it can display correctly after changing the font in Photoshop, Premiere, or another editor to a compatible Sinhala legacy font.
-
-Example:
+Sinhala Unicode is auto-converted to FM/DL legacy text. It may look like gibberish in
+a plain editor, but displays correctly once you pick a compatible legacy Sinhala font
+in Photoshop / Premiere. Example:
 
 ```text
 ලංකාවේ වැඩිම දුර යන්න පුලුවන් ඹුඩ්ගෙට් EV එකද?
+-> ,xldfõ jeäu ÿr hkak mq¨jka Uqâf.Ü EV tlo@
 ```
 
-converts to:
+The offline FM/DL rules are based on the public FMAbhaya converter work by Malinthe
+Samarakoon, originally created by LTRL at the University of Colombo School of Computing.
+
+## Where files go
 
 ```text
-,xldfõ jeäu ÿr hkak mq¨jka Uqâf.Ü EV tlo@
+Subtitles (.srt) : Downloads/
+Temporary audio  : system Temp folder (safe to delete)
 ```
 
-Use `Create Unicode SRT` for normal subtitles, or `Create FM/DL SRT` for legacy-font subtitles.
-
-The offline FM/DL conversion rules are based on the public FMAbhaya converter work by Malinthe Samarakoon, originally created by LTRL at the University of Colombo School of Computing.
-
-### Dump
-
-The `Dump` tab is useful when you already have Sinhala text but do not want to create timing placeholders first.
-
-1. Paste Sinhala text into the Unicode box.
-2. Keep existing lines, or split one paragraph into sentence, 1-word, 2-word, or 3-word lines.
-3. Click `Create Unicode Dump SRT` or `Create FM/DL Dump SRT`.
-
-Each non-empty line becomes one subtitle block. The first version uses simple 1-second timing per block, so you can manually adjust the timing later in Premiere, DaVinci Resolve, CapCut, or another editor.
-
-### AI Caption
-
-The `AI Caption` tab can create a real subtitle draft using Gemini:
-
-1. Paste your Gemini API key.
-2. Choose whether to remember it locally.
-3. Import or drag an audio/video file.
-4. Click `Generate AI Captions`.
-
-Generated AI subtitle drafts save to:
-
-```text
-Downloads/
-```
-
-AI Caption sends extracted audio to Google Gemini using your API key. Your key is stored only in local macOS app settings if you enable `Remember locally`.
-
-## Important Limits
-
-Offline placeholder mode does not understand speech or language content. It estimates timing from audio volume and silence.
-
-This means:
-
-- sentence mode is usually the easiest to edit
-- word modes are approximate
-- background music/noise may confuse timing
-- fast speech may group multiple real words together
-- long speech without pauses may become a long block
-
-Use it as a subtitle editing scaffold, then manually correct the final `.srt`.
-
-AI Caption can produce better text, but it is not fully offline and may still make Sinhala mistakes. Always review the generated `.srt`.
-
-## Developer Setup
-
-Install FFmpeg and Python dependencies:
+## Developer setup
 
 ```bash
-brew install ffmpeg
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Run the UI:
-
-```bash
+pip install -r requirements.txt   # PySide6, requests, pypdf, python-docx, ...
 python scripts/ui.py
 ```
 
-Run the terminal placeholder generator:
+FFmpeg must be available (`brew install ffmpeg` on macOS). The Windows build bundles
+its own FFmpeg, so end users never install anything.
 
-```bash
-python scripts/transcribe.py input/example.mp3 --mode sentence
-python scripts/transcribe.py input/example.mp4 --mode 1
-```
+## Building the apps
 
-## Build macOS App
+- **Windows:** built automatically by GitHub Actions — see
+  [`packaging/windows/BUILD-WINDOWS.md`](packaging/windows/BUILD-WINDOWS.md). No Windows
+  PC required. Push a `v*` tag (e.g. `v1.0`) to publish a release with the zip attached.
+- **macOS:**
 
-Install build dependency:
+  ```bash
+  pip install pyinstaller
+  pyinstaller --noconfirm --windowed \
+    --name "SinhalaSTT" \
+    --icon "assets/SinhalaSTT.icns" \
+    --add-data "assets:assets" \
+    --paths scripts \
+    scripts/ui.py
+  ```
 
-```bash
-pip install pyinstaller
-```
-
-Build the app:
-
-```bash
-pyinstaller --noconfirm --windowed \
-  --name "SinhalaSTT" \
-  --icon "assets/SinhalaSTT.icns" \
-  --add-data "assets:assets" \
-  --paths scripts \
-  scripts/ui.py
-```
-
-The app will be created in:
-
-```text
-dist/SinhalaSTT.app
-```
-
-## Distribution
-
-The first beta package is an unsigned macOS DMG:
-
-```text
-SinhalaSTT-0.2.3-beta-macOS-arm64.dmg
-```
-
-Because it is unsigned and not notarized, macOS may require users to right-click the app and choose `Open` the first time.
+  The app is created in `dist/SinhalaSTT.app`.

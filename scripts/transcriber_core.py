@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from font_converter import contains_sinhala, unicode_to_fm
+
 
 IS_WINDOWS = os.name == "nt"
 IS_MACOS = sys.platform == "darwin"
@@ -789,5 +791,134 @@ def generate_placeholder_srt(
         subtitle_count=subtitle_count,
         speech_region_count=len(regions),
         mode=mode,
+        warnings=warnings,
+    )
+
+
+# ---------------------------------------------------------------------------
+# High-level helpers for the simplified (ver1) UI.
+# These route Sinhala vs English and reuse all of the functions above.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SubtitleFilesResult:
+    files: list[tuple[str, Path]]  # (label, path), e.g. ("Unicode", ...)
+    block_count: int
+    is_sinhala: bool
+    warnings: list[str]
+
+
+def create_text_subtitles(
+    text: str,
+    mode: str = "sentence",
+    output_dir: Path = DOWNLOADS_OUTPUT_DIR,
+    seconds_per_block: float = 1.0,
+) -> SubtitleFilesResult:
+    """Turn pasted/loaded text into SRT file(s).
+
+    English text produces a single Unicode SRT. Sinhala Unicode text produces
+    both a Unicode SRT and an auto-converted FM/DL legacy-font SRT.
+    """
+    # Force the chosen split (sentence / 1 / 2 / 3) while respecting paragraph
+    # breaks. "keep" leaves the user's own line breaks untouched.
+    lines = pasted_text_to_lines(text, mode, preserve_existing_lines=False)
+    is_sinhala = contains_sinhala(text)
+
+    files: list[tuple[str, Path]] = []
+    warnings: list[str] = []
+
+    unicode_path = output_path_for_dump_srt(output_dir=output_dir, legacy=False)
+    unicode_result = create_text_dump_srt(lines, unicode_path, duration_per_block=seconds_per_block)
+    files.append(("Unicode", unicode_path))
+    warnings.extend(unicode_result.warnings)
+
+    if is_sinhala:
+        conversion = unicode_to_fm("\n".join(lines))
+        warnings.extend(conversion.warnings)
+        fm_lines = conversion.text.split("\n")
+        fm_path = output_path_for_dump_srt(output_dir=output_dir, legacy=True)
+        create_text_dump_srt(fm_lines, fm_path, duration_per_block=seconds_per_block)
+        files.append(("FM/DL", fm_path))
+
+    return SubtitleFilesResult(
+        files=files,
+        block_count=unicode_result.block_count,
+        is_sinhala=is_sinhala,
+        warnings=warnings,
+    )
+
+
+def create_audio_subtitles(
+    input_file: str | Path,
+    mode: str = DEFAULT_PLACEHOLDER_MODE,
+    script_text: str = "",
+    output_dir: Path = DOWNLOADS_OUTPUT_DIR,
+    log: LogCallback = default_log,
+    progress: ProgressCallback = default_progress,
+) -> SubtitleFilesResult:
+    """Make subtitles from audio (approximate timing).
+
+    Always detects speech/silence to build timed blocks. If a script is given,
+    the words are dropped onto those blocks (English -> 1 file; Sinhala ->
+    Unicode + FM/DL). With no script, the empty timed skeleton is saved.
+    """
+    has_script = bool(script_text.strip())
+    # When filling, keep the raw placeholder in the temp cache so it doesn't
+    # clutter Downloads; only the finished files go to output_dir.
+    placeholder_dir = CACHE_AUDIO_DIR if has_script else output_dir
+
+    placeholder = generate_placeholder_srt(
+        input_file,
+        mode=mode,
+        audio_dir=CACHE_AUDIO_DIR,
+        output_dir=placeholder_dir,
+        mp3_only=False,
+        log=log,
+        progress=progress,
+    )
+
+    if not has_script:
+        return SubtitleFilesResult(
+            files=[("Timed skeleton", placeholder.subtitle_path)],
+            block_count=placeholder.subtitle_count,
+            is_sinhala=False,
+            warnings=list(placeholder.warnings),
+        )
+
+    log("Placing your script onto the detected timing...")
+    script_lines = pasted_text_to_lines(script_text, mode, preserve_existing_lines=False)
+    unicode_script = "\n".join(script_lines)
+    is_sinhala = contains_sinhala(script_text)
+
+    files: list[tuple[str, Path]] = []
+    warnings = list(placeholder.warnings)
+
+    unicode_fill = fill_placeholder_srt(
+        placeholder.subtitle_path,
+        unicode_script,
+        output_dir=output_dir,
+        paste_mode="keep",
+        output_suffix="_unicode",
+    )
+    files.append(("Unicode", unicode_fill.output_path))
+    warnings.extend(unicode_fill.warnings)
+
+    if is_sinhala:
+        conversion = unicode_to_fm(unicode_script)
+        warnings.extend(conversion.warnings)
+        fm_fill = fill_placeholder_srt(
+            placeholder.subtitle_path,
+            conversion.text,
+            output_dir=output_dir,
+            paste_mode="keep",
+            output_suffix="_fm",
+        )
+        files.append(("FM/DL", fm_fill.output_path))
+
+    return SubtitleFilesResult(
+        files=files,
+        block_count=placeholder.subtitle_count,
+        is_sinhala=is_sinhala,
         warnings=warnings,
     )

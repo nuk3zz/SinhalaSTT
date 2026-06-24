@@ -1,4 +1,4 @@
-SinhalaSTT 0.2.3 beta — Windows
+SinhalaSTT 1.0 — Windows
 
 HOW TO RUN
 1. Unzip this whole folder anywhere you like (for example your Desktop).
@@ -19,12 +19,13 @@ WHERE FILES ARE SAVED
 - Temporary audio files are stored in your system Temp folder and can be
   deleted at any time.
 
-THE FOUR TABS
-- Create: turn an audio/video file into a placeholder SRT (timing only).
-- Fill: paste your Sinhala lines into a placeholder SRT, export Unicode or FM/DL.
-- Dump: turn pasted text straight into an SRT (1 second per line).
+THE THREE TOOLS
+- Text -> Subtitles: paste or open a script (PDF/DOCX/TXT), pick how to split it,
+  and create an SRT. Sinhala text also gets an FM/DL legacy-font SRT automatically.
+- Audio -> Subtitles (experimental): rough timing from audio; optionally fill in
+  your script.
 - AI Caption: optional. Uses your own Google Gemini API key over the internet.
-  The Create, Fill, and Dump tabs all work fully offline.
+  The Text and Audio tools work fully offline.
 
 FFMPEG LICENSE
 This app bundles FFmpeg (ffmpeg.exe and ffprobe.exe), which is free software

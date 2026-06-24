@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-Compact desktop UI for placeholder SRT generation and Sinhala line filling.
+SinhalaSTT 1.0 — a simple desktop tool for making Sinhala/English subtitles.
+
+Three tools:
+  1. Text -> Subtitles: paste or open a script, pick a split, get an SRT.
+                         Sinhala text also gets an FM/DL legacy-font SRT.
+  2. Audio -> Subtitles (experimental): rough timing from audio, optionally
+                         filled with your script.
+  3. AI Caption: optional online transcription with your own Gemini key.
 """
 
 from __future__ import annotations
@@ -10,12 +17,13 @@ import traceback
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSettings, QSignalBlocker, QThread, Qt, Signal
+from PySide6.QtCore import QObject, QSettings, QThread, Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -36,20 +44,17 @@ from ai_captions_core import (
     estimate_gemini_cost,
     generate_ai_captions_srt,
 )
-from font_converter import unicode_to_fm
+from document_reader import DocumentReadError, read_text_from_file
 from transcriber_core import (
     CACHE_AUDIO_DIR,
     DEFAULT_PLACEHOLDER_MODE,
     DOWNLOADS_OUTPUT_DIR,
     PlaceholderError,
-    create_dump_srt,
+    create_audio_subtitles,
+    create_text_subtitles,
     ffmpeg_install_hint,
-    fill_placeholder_srt,
     find_tool,
-    generate_placeholder_srt,
     get_audio_duration,
-    parse_srt_blocks,
-    pasted_text_to_lines,
 )
 
 
@@ -61,17 +66,17 @@ MODE_LABELS = {
 }
 
 APP_NAME = "SinhalaSTT"
-APP_VERSION = "0.2.3 beta"
-APP_TAGLINE = "Create editable Sinhala subtitle timing drafts from audio or video."
+APP_VERSION = "1.0"
+APP_TAGLINE = "Make Sinhala or English subtitles from a script or from audio."
 GITHUB_URL = "https://github.com/nuk3zz/SinhalaSTT"
 FFMPEG_INSTALL_MESSAGE = (
-    "FFmpeg setup needed: SinhalaSTT can open, but SRT creation needs FFmpeg. "
-    + ffmpeg_install_hint()
+    "FFmpeg setup needed: the Audio and AI tabs need FFmpeg. " + ffmpeg_install_hint()
 )
 
 SUPPORTED_AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".aiff", ".aif"}
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"}
 SUPPORTED_INPUT_SUFFIXES = SUPPORTED_AUDIO_SUFFIXES | SUPPORTED_VIDEO_SUFFIXES
+DOCUMENT_FILTER = "Documents (*.pdf *.docx *.txt);;All files (*)"
 
 
 APP_STYLE = """
@@ -156,6 +161,19 @@ QPushButton {
     padding: 8px 12px;
     font-weight: 650;
 }
+QPushButton#Primary {
+    color: #ffffff;
+    background: #4f7fbf;
+    border: 1px solid #4574b3;
+}
+QPushButton#Primary:hover {
+    background: #5a8ace;
+}
+QPushButton#Primary:disabled {
+    color: #eef2f8;
+    background: #aebfd8;
+    border: 1px solid #aebfd8;
+}
 QPushButton:hover {
     background: #fbfdff;
     border: 1px solid #8aa2c6;
@@ -194,6 +212,21 @@ QComboBox::down-arrow {
 QComboBox::down-arrow:on {
     top: 1px;
 }
+QComboBox QAbstractItemView {
+    color: #171b22;
+    background: #ffffff;
+    selection-background-color: #e8f0fb;
+}
+QDoubleSpinBox {
+    color: #171b22;
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    border-radius: 9px;
+    padding: 6px 8px;
+}
+QDoubleSpinBox:hover {
+    border: 1px solid #8aa2c6;
+}
 QLineEdit {
     color: #171b22;
     background: #ffffff;
@@ -207,11 +240,6 @@ QLineEdit:hover, QLineEdit:focus {
 QCheckBox {
     color: #4b5563;
 }
-QComboBox QAbstractItemView {
-    color: #171b22;
-    background: #ffffff;
-    selection-background-color: #e8f0fb;
-}
 QPlainTextEdit {
     color: #171b22;
     background: #ffffff;
@@ -222,12 +250,6 @@ QPlainTextEdit {
 }
 QPlainTextEdit:hover, QPlainTextEdit:focus {
     border: 1px solid #8aa2c6;
-}
-QPlainTextEdit#LineNumbers {
-    color: #8b95a3;
-    background: #f4f6f9;
-    border: 1px solid #d8dee8;
-    max-width: 54px;
 }
 QProgressBar {
     color: #4b5563;
@@ -296,10 +318,10 @@ class HeroBanner(QWidget):
         title = QLabel(APP_NAME)
         title.setObjectName("HeroTitle")
 
-        beta = QLabel("BETA")
-        beta.setObjectName("BetaPill")
-        beta.setMaximumWidth(56)
-        beta.setAlignment(Qt.AlignCenter)
+        version_pill = QLabel(f"v{APP_VERSION}")
+        version_pill.setObjectName("BetaPill")
+        version_pill.setMaximumWidth(56)
+        version_pill.setAlignment(Qt.AlignCenter)
 
         tagline = QLabel("Turning Sinhala speech into accurate subtitles.")
         tagline.setObjectName("HeroTagline")
@@ -308,7 +330,7 @@ class HeroBanner(QWidget):
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(12)
         title_row.addWidget(title)
-        title_row.addWidget(beta)
+        title_row.addWidget(version_pill)
         title_row.addStretch(1)
 
         text_layout = QVBoxLayout()
@@ -395,34 +417,29 @@ class DropZone(QLabel):
         self.style().polish(self)
 
 
-class PlaceholderWorker(QObject):
+class AudioWorker(QObject):
     log_message = Signal(str)
     progress_changed = Signal(int)
-    finished = Signal(str, int, int, list)
+    finished = Signal(object)  # SubtitleFilesResult
     failed = Signal(str)
 
-    def __init__(self, input_path: Path, mode: str) -> None:
+    def __init__(self, input_path: Path, mode: str, script_text: str) -> None:
         super().__init__()
         self.input_path = input_path
         self.mode = mode
+        self.script_text = script_text
 
     def run(self) -> None:
         try:
-            result = generate_placeholder_srt(
+            result = create_audio_subtitles(
                 self.input_path,
                 mode=self.mode,
-                audio_dir=CACHE_AUDIO_DIR,
+                script_text=self.script_text,
                 output_dir=DOWNLOADS_OUTPUT_DIR,
-                mp3_only=False,
                 log=self.log_message.emit,
                 progress=self.progress_changed.emit,
             )
-            self.finished.emit(
-                str(result.subtitle_path),
-                result.subtitle_count,
-                result.speech_region_count,
-                result.warnings,
-            )
+            self.finished.emit(result)
         except PlaceholderError as error:
             self.failed.emit(str(error))
         except Exception:
@@ -469,25 +486,23 @@ class AiCaptionWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.selected_input: Path | None = None
+        self.selected_audio: Path | None = None
         self.selected_ai_input: Path | None = None
-        self.selected_srt: Path | None = None
-        self.current_srt_block_count = 0
         self.settings = QSettings(APP_NAME, APP_NAME)
-        self.thread: QThread | None = None
-        self.worker: PlaceholderWorker | None = None
+        self.audio_thread: QThread | None = None
+        self.audio_worker: AudioWorker | None = None
         self.ai_thread: QThread | None = None
         self.ai_worker: AiCaptionWorker | None = None
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(620, 600)
-        self.resize(760, 680)
+        self.resize(760, 700)
 
         self.banner = HeroBanner()
 
         title = QLabel(APP_NAME)
         title.setObjectName("Title")
-        version = QLabel(APP_VERSION)
+        version = QLabel(f"v{APP_VERSION}")
         version.setObjectName("Version")
         subtitle = QLabel(APP_TAGLINE)
         subtitle.setObjectName("Subtitle")
@@ -507,9 +522,8 @@ class MainWindow(QMainWindow):
         subtitle_row.addWidget(subtitle)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.build_create_tab(), "Create")
-        self.tabs.addTab(self.build_fill_tab(), "Fill")
-        self.tabs.addTab(self.build_dump_tab(), "Dump")
+        self.tabs.addTab(self.build_text_tab(), "Text → Subtitles")
+        self.tabs.addTab(self.build_audio_tab(), "Audio → Subtitles")
         self.tabs.addTab(self.build_ai_tab(), "AI Caption")
 
         layout = QVBoxLayout()
@@ -531,289 +545,337 @@ class MainWindow(QMainWindow):
     def show_dependency_notice(self) -> None:
         if find_tool("ffmpeg") and find_tool("ffprobe"):
             return
+        self.audio_status_label.setText(FFMPEG_INSTALL_MESSAGE)
+        self.append_audio_log("First-time setup note:")
+        self.append_audio_log(FFMPEG_INSTALL_MESSAGE)
 
-        self.output_label.setText(FFMPEG_INSTALL_MESSAGE)
-        self.append_log("First-time setup note:")
-        self.append_log(FFMPEG_INSTALL_MESSAGE)
-        self.append_log("The app will not install anything automatically.")
+    # ------------------------------------------------------------------
+    # Tab 1: Text -> Subtitles
+    # ------------------------------------------------------------------
+    def build_text_tab(self) -> QWidget:
+        intro = QLabel(
+            "Paste your script or open a PDF / DOCX / TXT file, pick how to split it, "
+            "then create the subtitles. Sinhala text also gets an FM/DL legacy-font file."
+        )
+        intro.setObjectName("PathLabel")
+        intro.setWordWrap(True)
 
-    def build_create_tab(self) -> QWidget:
-        self.file_label = QLabel("No file selected")
-        self.file_label.setObjectName("PathLabel")
-        self.file_label.setWordWrap(True)
+        self.open_text_button = QPushButton("Open File (PDF, DOCX, TXT)")
+        self.open_text_button.clicked.connect(self.open_text_document)
 
-        self.drop_zone = DropZone()
-        self.drop_zone.file_dropped.connect(self.set_selected_input)
-        self.drop_zone.rejected.connect(self.append_log)
-
-        self.choose_audio_button = QPushButton("Import Audio")
-        self.choose_audio_button.clicked.connect(self.choose_audio)
-
-        self.choose_video_button = QPushButton("Import MP4/Video")
-        self.choose_video_button.clicked.connect(self.choose_video)
-
-        self.mode_box = QComboBox()
+        self.text_mode_box = QComboBox()
         for mode, label in MODE_LABELS.items():
-            self.mode_box.addItem(label, mode)
-        self.mode_box.setCurrentIndex(list(MODE_LABELS).index(DEFAULT_PLACEHOLDER_MODE))
+            self.text_mode_box.addItem(label, mode)
+        self.text_mode_box.setCurrentIndex(list(MODE_LABELS).index(DEFAULT_PLACEHOLDER_MODE))
 
-        self.start_button = QPushButton("Create SRT")
-        self.start_button.setEnabled(False)
-        self.start_button.clicked.connect(self.start_generation)
+        self.text_seconds = QDoubleSpinBox()
+        self.text_seconds.setRange(0.2, 60.0)
+        self.text_seconds.setSingleStep(0.5)
+        self.text_seconds.setValue(1.0)
+        self.text_seconds.setDecimals(1)
+        self.text_seconds.setSuffix(" s")
+        self.text_seconds.setMaximumWidth(90)
 
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+        self.text_create_button = QPushButton("Create Subtitles")
+        self.text_create_button.setObjectName("Primary")
+        self.text_create_button.setEnabled(False)
+        self.text_create_button.clicked.connect(self.create_text_subtitles_action)
 
-        self.log_box = QPlainTextEdit()
-        self.log_box.setReadOnly(True)
-        self.log_box.setMaximumHeight(110)
-        self.log_box.setPlaceholderText("Logs...")
+        self.text_box = QPlainTextEdit()
+        self.text_box.setPlaceholderText(
+            "Paste Sinhala or English text here, or use Open File.\n"
+            "Tip: choose a split (Sentences / 1 / 2 / 3 words) before creating."
+        )
+        self.text_box.textChanged.connect(self.update_text_button)
 
-        self.output_label = QLabel(f"Saves to Downloads. WAV cache: {CACHE_AUDIO_DIR}")
-        self.output_label.setObjectName("PathLabel")
-        self.output_label.setWordWrap(True)
+        self.text_status_label = QLabel("Subtitles save to your Downloads folder.")
+        self.text_status_label.setObjectName("PathLabel")
+        self.text_status_label.setWordWrap(True)
+
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(8)
+        controls_row.addWidget(self.open_text_button)
+        controls_row.addWidget(QLabel("Split:"))
+        controls_row.addWidget(self.text_mode_box, 1)
+        controls_row.addWidget(QLabel("Each line:"))
+        controls_row.addWidget(self.text_seconds)
+
+        action_row = QHBoxLayout()
+        action_row.addStretch(1)
+        action_row.addWidget(self.text_create_button)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        layout.addWidget(intro)
+        layout.addLayout(controls_row)
+        layout.addWidget(self.text_box, 1)
+        layout.addLayout(action_row)
+        layout.addWidget(self.text_status_label)
+
+        tab = QWidget()
+        tab.setLayout(layout)
+        return tab
+
+    def update_text_button(self) -> None:
+        self.text_create_button.setEnabled(bool(self.text_box.toPlainText().strip()))
+
+    def open_text_document(self) -> None:
+        file_name, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Open Script",
+            str(Path.home() / "Documents"),
+            DOCUMENT_FILTER,
+        )
+        if not file_name:
+            return
+        try:
+            text = read_text_from_file(file_name)
+        except DocumentReadError as error:
+            QMessageBox.warning(self, "Could not read file", str(error))
+            return
+        self.text_box.setPlainText(text)
+        self.text_status_label.setText(f"Loaded text from: {Path(file_name).name}")
+
+    def create_text_subtitles_action(self) -> None:
+        text = self.text_box.toPlainText()
+        if not text.strip():
+            QMessageBox.warning(self, "No text", "Paste or open some text first.")
+            return
+
+        try:
+            result = create_text_subtitles(
+                text,
+                mode=self.text_mode_box.currentData(),
+                output_dir=DOWNLOADS_OUTPUT_DIR,
+                seconds_per_block=self.text_seconds.value(),
+            )
+        except PlaceholderError as error:
+            QMessageBox.critical(self, "Could not create subtitles", str(error))
+            return
+
+        lines = [f"Saved {len(result.files)} file(s) to Downloads:"]
+        lines.extend(f"  {label}: {path}" for label, path in result.files)
+        lines.append(f"Subtitle blocks: {result.block_count}")
+        if result.is_sinhala:
+            lines.append("Detected Sinhala — an FM/DL legacy-font version was also saved.")
+        lines.extend(f"Note: {warning}" for warning in result.warnings)
+        self.text_status_label.setText("\n".join(lines))
+
+    # ------------------------------------------------------------------
+    # Tab 2: Audio -> Subtitles (experimental)
+    # ------------------------------------------------------------------
+    def build_audio_tab(self) -> QWidget:
+        note = QLabel(
+            "Experimental: timing is estimated from pauses in the audio, so it is "
+            "approximate. Add a script below to fill in the words, or leave it empty "
+            "for blank timed blocks."
+        )
+        note.setObjectName("SmallNote")
+        note.setWordWrap(True)
+
+        self.audio_drop = DropZone()
+        self.audio_drop.file_dropped.connect(self.set_audio_input)
+        self.audio_drop.rejected.connect(self.append_audio_log)
+
+        self.audio_choose_audio_button = QPushButton("Import Audio")
+        self.audio_choose_audio_button.clicked.connect(self.choose_audio)
+        self.audio_choose_video_button = QPushButton("Import MP4/Video")
+        self.audio_choose_video_button.clicked.connect(self.choose_video)
+
+        self.audio_file_label = QLabel("No file selected")
+        self.audio_file_label.setObjectName("PathLabel")
+        self.audio_file_label.setWordWrap(True)
+
+        self.audio_mode_box = QComboBox()
+        for mode, label in MODE_LABELS.items():
+            self.audio_mode_box.addItem(label, mode)
+        self.audio_mode_box.setCurrentIndex(list(MODE_LABELS).index(DEFAULT_PLACEHOLDER_MODE))
+
+        self.audio_open_script_button = QPushButton("Open Script File")
+        self.audio_open_script_button.clicked.connect(self.open_audio_script_document)
+
+        self.audio_script_box = QPlainTextEdit()
+        self.audio_script_box.setMaximumHeight(120)
+        self.audio_script_box.setPlaceholderText(
+            "Optional: paste your script here (or use Open Script File).\n"
+            "Leave empty to just get blank timed blocks."
+        )
+
+        self.audio_start_button = QPushButton("Create Subtitles from Audio")
+        self.audio_start_button.setObjectName("Primary")
+        self.audio_start_button.setEnabled(False)
+        self.audio_start_button.clicked.connect(self.start_audio_generation)
+
+        self.audio_progress = QProgressBar()
+        self.audio_progress.setRange(0, 100)
+        self.audio_progress.setValue(0)
+
+        self.audio_log = QPlainTextEdit()
+        self.audio_log.setReadOnly(True)
+        self.audio_log.setMaximumHeight(100)
+        self.audio_log.setPlaceholderText("Logs...")
+
+        self.audio_status_label = QLabel("Subtitles save to your Downloads folder.")
+        self.audio_status_label.setObjectName("PathLabel")
+        self.audio_status_label.setWordWrap(True)
 
         import_row = QHBoxLayout()
         import_row.setSpacing(8)
-        import_row.addWidget(self.choose_audio_button)
-        import_row.addWidget(self.choose_video_button)
+        import_row.addWidget(self.audio_choose_audio_button)
+        import_row.addWidget(self.audio_choose_video_button)
 
-        action_row = QHBoxLayout()
-        action_row.setSpacing(8)
-        action_row.addWidget(QLabel("Size:"))
-        action_row.addWidget(self.mode_box, 1)
-        action_row.addWidget(self.start_button)
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        mode_row.addWidget(QLabel("Split:"))
+        mode_row.addWidget(self.audio_mode_box, 1)
+        mode_row.addWidget(self.audio_open_script_button)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
-        layout.addWidget(self.drop_zone)
+        layout.addWidget(self.audio_drop)
         layout.addLayout(import_row)
-        layout.addWidget(self.file_label)
-        layout.addLayout(action_row)
-        layout.addWidget(self.progress_bar)
-        layout.addWidget(self.log_box)
-        layout.addWidget(self.output_label)
+        layout.addWidget(self.audio_file_label)
+        layout.addLayout(mode_row)
+        layout.addWidget(QLabel("Script (optional):"))
+        layout.addWidget(self.audio_script_box)
+        layout.addWidget(self.audio_start_button)
+        layout.addWidget(self.audio_progress)
+        layout.addWidget(self.audio_log)
+        layout.addWidget(note)
+        layout.addWidget(self.audio_status_label)
 
         tab = QWidget()
         tab.setLayout(layout)
         return tab
 
-    def build_fill_tab(self) -> QWidget:
-        self.srt_label = QLabel("No SRT selected")
-        self.srt_label.setObjectName("PathLabel")
-        self.srt_label.setWordWrap(True)
-
-        self.choose_srt_button = QPushButton("Choose SRT")
-        self.choose_srt_button.clicked.connect(self.choose_srt)
-
-        self.fill_button = QPushButton("Create Unicode SRT")
-        self.fill_button.setEnabled(False)
-        self.fill_button.clicked.connect(self.create_unicode_filled_srt)
-
-        self.convert_fm_button = QPushButton("Convert to FM/DL")
-        self.convert_fm_button.clicked.connect(self.convert_fill_text_to_fm)
-
-        self.copy_fm_button = QPushButton("Copy FM/DL Text")
-        self.copy_fm_button.setEnabled(False)
-        self.copy_fm_button.clicked.connect(self.copy_fm_text)
-
-        self.fm_fill_button = QPushButton("Create FM/DL SRT")
-        self.fm_fill_button.setEnabled(False)
-        self.fm_fill_button.clicked.connect(self.create_fm_filled_srt)
-
-        self.fill_mode_box = QComboBox()
-        self.fill_mode_box.addItem("Keep pasted lines", "keep")
-        for mode, label in MODE_LABELS.items():
-            self.fill_mode_box.addItem(f"Split paragraph: {label}", mode)
-        self.fill_mode_box.currentIndexChanged.connect(self.update_line_numbers)
-
-        self.split_preview_button = QPushButton("Split Paragraph")
-        self.split_preview_button.clicked.connect(self.apply_smart_split_to_paste)
-
-        self.paste_box = QPlainTextEdit()
-        self.paste_box.setPlaceholderText(
-            "Paste Sinhala text here.\n"
-            "Line-by-line text stays line-by-line. A single paragraph can be split automatically."
+    def choose_audio(self) -> None:
+        file_name, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Import Audio",
+            str(Path.home() / "Documents"),
+            "Audio files (*.mp3 *.wav *.m4a *.aac *.flac *.aiff *.aif);;All files (*)",
         )
-        self.paste_box.textChanged.connect(self.update_fill_button)
-        self.paste_box.textChanged.connect(self.update_line_numbers)
-        self.paste_box.textChanged.connect(self.clear_fm_output)
-        self.paste_box.verticalScrollBar().valueChanged.connect(self.sync_line_number_scroll)
+        if file_name:
+            self.set_audio_input(Path(file_name))
 
-        self.fm_box = QPlainTextEdit()
-        self.fm_box.setReadOnly(True)
-        self.fm_box.setPlaceholderText(
-            "FM/DL converted text appears here.\n"
-            "Copy it, or create an FM/DL SRT for legacy Sinhala fonts."
+    def choose_video(self) -> None:
+        file_name, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Import MP4 or Video",
+            str(Path.home() / "Movies"),
+            "Video files (*.mp4 *.mov *.m4v *.mkv *.avi *.webm);;All files (*)",
         )
-        self.fm_box.verticalScrollBar().valueChanged.connect(self.sync_fm_scroll_to_unicode)
+        if file_name:
+            self.set_audio_input(Path(file_name))
 
-        self.line_numbers = QPlainTextEdit()
-        self.line_numbers.setObjectName("LineNumbers")
-        self.line_numbers.setReadOnly(True)
-        self.line_numbers.setFocusPolicy(Qt.NoFocus)
-        self.line_numbers.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.line_numbers.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.line_numbers.setPlainText("001")
+    def set_audio_input(self, path: Path) -> None:
+        path = path.expanduser()
+        if path.suffix.lower() not in SUPPORTED_INPUT_SUFFIXES:
+            QMessageBox.warning(
+                self,
+                "Unsupported file",
+                "Please choose MP3, WAV, M4A, AAC, FLAC, AIFF, MP4, MOV, MKV, AVI, or WEBM.",
+            )
+            return
+        self.selected_audio = path
+        self.audio_file_label.setText(str(path))
+        self.audio_drop.setText(f"Selected:\n{path.name}")
+        self.audio_progress.setValue(0)
+        self.audio_start_button.setEnabled(True)
+        self.audio_log.clear()
+        self.append_audio_log(f"Selected: {path.name}")
 
-        self.fill_status_label = QLabel(f"Filled SRT saves to Downloads: {DOWNLOADS_OUTPUT_DIR}")
-        self.fill_status_label.setObjectName("PathLabel")
-        self.fill_status_label.setWordWrap(True)
-
-        button_row = QHBoxLayout()
-        button_row.setSpacing(8)
-        button_row.addWidget(self.choose_srt_button)
-        button_row.addWidget(self.fill_button)
-        button_row.addWidget(self.fm_fill_button)
-        button_row.addStretch(1)
-
-        split_row = QHBoxLayout()
-        split_row.setSpacing(8)
-        split_row.addWidget(QLabel("Paste:"))
-        split_row.addWidget(self.fill_mode_box, 1)
-        split_row.addWidget(self.split_preview_button)
-        split_row.addWidget(self.convert_fm_button)
-        split_row.addWidget(self.copy_fm_button)
-
-        unicode_label = QLabel("Unicode Sinhala")
-        unicode_label.setObjectName("SmallNote")
-        fm_label = QLabel("FM/DL Legacy Text")
-        fm_label.setObjectName("SmallNote")
-
-        label_row = QHBoxLayout()
-        label_row.setSpacing(8)
-        label_row.addSpacing(60)
-        label_row.addWidget(unicode_label)
-        label_row.addWidget(fm_label)
-
-        paste_row = QHBoxLayout()
-        paste_row.setSpacing(6)
-        paste_row.addWidget(self.line_numbers)
-        paste_row.addWidget(self.paste_box, 1)
-        paste_row.addWidget(self.fm_box, 1)
-
-        layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-        layout.addWidget(self.srt_label)
-        layout.addLayout(button_row)
-        layout.addLayout(split_row)
-        layout.addLayout(label_row)
-        layout.addLayout(paste_row)
-        layout.addWidget(self.fill_status_label)
-
-        tab = QWidget()
-        tab.setLayout(layout)
-        return tab
-
-    def build_dump_tab(self) -> QWidget:
-        self.dump_intro_label = QLabel(
-            "Create a fresh SRT from pasted text only. Each subtitle block is 1 second long."
+    def open_audio_script_document(self) -> None:
+        file_name, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Open Script",
+            str(Path.home() / "Documents"),
+            DOCUMENT_FILTER,
         )
-        self.dump_intro_label.setObjectName("PathLabel")
-        self.dump_intro_label.setWordWrap(True)
+        if not file_name:
+            return
+        try:
+            text = read_text_from_file(file_name)
+        except DocumentReadError as error:
+            QMessageBox.warning(self, "Could not read file", str(error))
+            return
+        self.audio_script_box.setPlainText(text)
+        self.append_audio_log(f"Loaded script from: {Path(file_name).name}")
 
-        self.dump_unicode_button = QPushButton("Create Unicode Dump SRT")
-        self.dump_unicode_button.setEnabled(False)
-        self.dump_unicode_button.clicked.connect(self.create_dump_unicode_srt)
+    def start_audio_generation(self) -> None:
+        if self.selected_audio is None:
+            QMessageBox.warning(self, "No file selected", "Please import or drop an audio/video file first.")
+            return
 
-        self.dump_convert_fm_button = QPushButton("Convert to FM/DL")
-        self.dump_convert_fm_button.clicked.connect(self.convert_dump_text_to_fm)
+        self.set_audio_controls_enabled(False)
+        self.audio_progress.setValue(0)
+        self.append_audio_log("Starting...")
 
-        self.dump_copy_fm_button = QPushButton("Copy FM/DL Text")
-        self.dump_copy_fm_button.setEnabled(False)
-        self.dump_copy_fm_button.clicked.connect(self.copy_dump_fm_text)
-
-        self.dump_fm_button = QPushButton("Create FM/DL Dump SRT")
-        self.dump_fm_button.setEnabled(False)
-        self.dump_fm_button.clicked.connect(self.create_dump_fm_srt)
-
-        self.dump_mode_box = QComboBox()
-        self.dump_mode_box.addItem("Keep pasted lines", "keep")
-        for mode, label in MODE_LABELS.items():
-            self.dump_mode_box.addItem(f"Split paragraph: {label}", mode)
-        self.dump_mode_box.currentIndexChanged.connect(self.update_dump_line_numbers)
-
-        self.dump_split_button = QPushButton("Split Paragraph")
-        self.dump_split_button.clicked.connect(self.apply_dump_split)
-
-        self.dump_paste_box = QPlainTextEdit()
-        self.dump_paste_box.setPlaceholderText(
-            "Paste Sinhala text here.\n"
-            "Use line breaks for manual blocks, or split one paragraph automatically."
+        self.audio_thread = QThread()
+        self.audio_worker = AudioWorker(
+            self.selected_audio,
+            self.audio_mode_box.currentData(),
+            self.audio_script_box.toPlainText(),
         )
-        self.dump_paste_box.textChanged.connect(self.update_dump_buttons)
-        self.dump_paste_box.textChanged.connect(self.update_dump_line_numbers)
-        self.dump_paste_box.textChanged.connect(self.clear_dump_fm_output)
-        self.dump_paste_box.verticalScrollBar().valueChanged.connect(self.sync_dump_line_number_scroll)
+        self.audio_worker.moveToThread(self.audio_thread)
 
-        self.dump_fm_box = QPlainTextEdit()
-        self.dump_fm_box.setReadOnly(True)
-        self.dump_fm_box.setPlaceholderText(
-            "FM/DL converted text appears here.\n"
-            "Use this for legacy Sinhala fonts."
-        )
-        self.dump_fm_box.verticalScrollBar().valueChanged.connect(self.sync_dump_fm_scroll_to_unicode)
+        self.audio_thread.started.connect(self.audio_worker.run)
+        self.audio_worker.log_message.connect(self.append_audio_log)
+        self.audio_worker.progress_changed.connect(self.audio_progress.setValue)
+        self.audio_worker.finished.connect(self.on_audio_finished)
+        self.audio_worker.failed.connect(self.on_audio_failed)
+        self.audio_worker.finished.connect(self.audio_thread.quit)
+        self.audio_worker.failed.connect(self.audio_thread.quit)
+        self.audio_thread.finished.connect(self.audio_worker.deleteLater)
+        self.audio_thread.finished.connect(self.audio_thread.deleteLater)
+        self.audio_thread.finished.connect(self.reset_audio_worker_refs)
 
-        self.dump_line_numbers = QPlainTextEdit()
-        self.dump_line_numbers.setObjectName("LineNumbers")
-        self.dump_line_numbers.setReadOnly(True)
-        self.dump_line_numbers.setFocusPolicy(Qt.NoFocus)
-        self.dump_line_numbers.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.dump_line_numbers.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.dump_line_numbers.setPlainText("001")
+        self.audio_thread.start()
 
-        self.dump_status_label = QLabel("Dump SRT saves to Downloads. Timing: 1 second per non-empty line.")
-        self.dump_status_label.setObjectName("PathLabel")
-        self.dump_status_label.setWordWrap(True)
+    def set_audio_controls_enabled(self, enabled: bool) -> None:
+        self.audio_choose_audio_button.setEnabled(enabled)
+        self.audio_choose_video_button.setEnabled(enabled)
+        self.audio_drop.setEnabled(enabled)
+        self.audio_mode_box.setEnabled(enabled)
+        self.audio_open_script_button.setEnabled(enabled)
+        self.audio_start_button.setEnabled(enabled and self.selected_audio is not None)
 
-        button_row = QHBoxLayout()
-        button_row.setSpacing(8)
-        button_row.addWidget(self.dump_unicode_button)
-        button_row.addWidget(self.dump_fm_button)
-        button_row.addStretch(1)
+    def on_audio_finished(self, result) -> None:
+        self.audio_progress.setValue(100)
+        lines = [f"Saved {len(result.files)} file(s) to Downloads:"]
+        lines.extend(f"  {label}: {path}" for label, path in result.files)
+        lines.append(f"Subtitle blocks: {result.block_count}")
+        if result.is_sinhala:
+            lines.append("Detected Sinhala — an FM/DL legacy-font version was also saved.")
+        lines.extend(f"Note: {warning}" for warning in result.warnings)
+        self.audio_status_label.setText("\n".join(lines))
+        for label, path in result.files:
+            self.append_audio_log(f"Saved {label}: {path}")
+        self.set_audio_controls_enabled(True)
 
-        split_row = QHBoxLayout()
-        split_row.setSpacing(8)
-        split_row.addWidget(QLabel("Paste:"))
-        split_row.addWidget(self.dump_mode_box, 1)
-        split_row.addWidget(self.dump_split_button)
-        split_row.addWidget(self.dump_convert_fm_button)
-        split_row.addWidget(self.dump_copy_fm_button)
+    def on_audio_failed(self, message: str) -> None:
+        self.append_audio_log("Error:")
+        self.append_audio_log(message)
+        self.set_audio_controls_enabled(True)
+        if "FFmpeg" in message or "FFprobe" in message:
+            self.audio_status_label.setText(FFMPEG_INSTALL_MESSAGE)
+            return
+        QMessageBox.critical(self, "Audio subtitles failed", message)
 
-        unicode_label = QLabel("Unicode Sinhala")
-        unicode_label.setObjectName("SmallNote")
-        fm_label = QLabel("FM/DL Legacy Text")
-        fm_label.setObjectName("SmallNote")
+    def reset_audio_worker_refs(self) -> None:
+        self.audio_thread = None
+        self.audio_worker = None
 
-        label_row = QHBoxLayout()
-        label_row.setSpacing(8)
-        label_row.addSpacing(60)
-        label_row.addWidget(unicode_label)
-        label_row.addWidget(fm_label)
+    def append_audio_log(self, message: str) -> None:
+        self.audio_log.appendPlainText(message)
+        scrollbar = self.audio_log.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
-        paste_row = QHBoxLayout()
-        paste_row.setSpacing(6)
-        paste_row.addWidget(self.dump_line_numbers)
-        paste_row.addWidget(self.dump_paste_box, 1)
-        paste_row.addWidget(self.dump_fm_box, 1)
-
-        layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-        layout.addWidget(self.dump_intro_label)
-        layout.addLayout(button_row)
-        layout.addLayout(split_row)
-        layout.addLayout(label_row)
-        layout.addLayout(paste_row)
-        layout.addWidget(self.dump_status_label)
-
-        tab = QWidget()
-        tab.setLayout(layout)
-        return tab
-
+    # ------------------------------------------------------------------
+    # Tab 3: AI Caption
+    # ------------------------------------------------------------------
     def build_ai_tab(self) -> QWidget:
         saved_key = self.settings.value("gemini_api_key", "", str)
 
@@ -830,7 +892,8 @@ class MainWindow(QMainWindow):
         self.ai_model_label.setWordWrap(True)
 
         self.ai_note_label = QLabel(
-            "Offline tools stay local. AI Captions sends extracted audio to Google Gemini using your API key."
+            "Offline tools stay local. AI Caption sends extracted audio to Google Gemini "
+            "using your API key."
         )
         self.ai_note_label.setObjectName("SmallNote")
         self.ai_note_label.setWordWrap(True)
@@ -841,7 +904,6 @@ class MainWindow(QMainWindow):
 
         self.ai_choose_audio_button = QPushButton("Import Audio")
         self.ai_choose_audio_button.clicked.connect(self.choose_ai_audio)
-
         self.ai_choose_video_button = QPushButton("Import MP4/Video")
         self.ai_choose_video_button.clicked.connect(self.choose_ai_video)
 
@@ -854,6 +916,7 @@ class MainWindow(QMainWindow):
         self.ai_estimate_label.setWordWrap(True)
 
         self.ai_start_button = QPushButton("Generate AI Captions")
+        self.ai_start_button.setObjectName("Primary")
         self.ai_start_button.setEnabled(False)
         self.ai_start_button.clicked.connect(self.start_ai_generation)
 
@@ -894,28 +957,6 @@ class MainWindow(QMainWindow):
         tab.setLayout(layout)
         return tab
 
-    def choose_audio(self) -> None:
-        file_name, _filter = QFileDialog.getOpenFileName(
-            self,
-            "Import Audio",
-            str(Path.home() / "Documents"),
-            "Audio files (*.mp3 *.wav *.m4a *.aac *.flac *.aiff *.aif);;All files (*)",
-        )
-
-        if file_name:
-            self.set_selected_input(Path(file_name))
-
-    def choose_video(self) -> None:
-        file_name, _filter = QFileDialog.getOpenFileName(
-            self,
-            "Import MP4 or Video",
-            str(Path.home() / "Movies"),
-            "Video files (*.mp4 *.mov *.m4v *.mkv *.avi *.webm);;All files (*)",
-        )
-
-        if file_name:
-            self.set_selected_input(Path(file_name))
-
     def choose_ai_audio(self) -> None:
         file_name, _filter = QFileDialog.getOpenFileName(
             self,
@@ -923,7 +964,6 @@ class MainWindow(QMainWindow):
             str(Path.home() / "Documents"),
             "Audio files (*.mp3 *.wav *.m4a *.aac *.flac *.aiff *.aif);;All files (*)",
         )
-
         if file_name:
             self.set_ai_selected_input(Path(file_name))
 
@@ -934,42 +974,18 @@ class MainWindow(QMainWindow):
             str(Path.home() / "Movies"),
             "Video files (*.mp4 *.mov *.m4v *.mkv *.avi *.webm);;All files (*)",
         )
-
         if file_name:
             self.set_ai_selected_input(Path(file_name))
 
-    def set_selected_input(self, path: Path) -> None:
-        path = path.expanduser()
-        suffix = path.suffix.lower()
-
-        if suffix not in SUPPORTED_INPUT_SUFFIXES:
-            QMessageBox.warning(
-                self,
-                "Unsupported file",
-                "Please choose MP3, WAV, M4A, AAC, FLAC, AIFF, MP4, MOV, MKV, AVI, or WEBM.",
-            )
-            return
-
-        self.selected_input = path
-        self.file_label.setText(str(path))
-        self.drop_zone.setText(f"Selected:\n{path.name}")
-        self.progress_bar.setValue(0)
-        self.start_button.setEnabled(True)
-        self.log_box.clear()
-        self.append_log(f"Selected: {path.name}")
-
     def set_ai_selected_input(self, path: Path) -> None:
         path = path.expanduser()
-        suffix = path.suffix.lower()
-
-        if suffix not in SUPPORTED_INPUT_SUFFIXES:
+        if path.suffix.lower() not in SUPPORTED_INPUT_SUFFIXES:
             QMessageBox.warning(
                 self,
                 "Unsupported file",
                 "Please choose MP3, WAV, M4A, AAC, FLAC, AIFF, MP4, MOV, MKV, AVI, or WEBM.",
             )
             return
-
         self.selected_ai_input = path
         self.ai_file_label.setText(str(path))
         self.ai_drop_zone.setText(f"Selected:\n{path.name}")
@@ -988,272 +1004,6 @@ class MainWindow(QMainWindow):
                 "Cost estimate appears after FFmpeg prepares the audio."
             )
 
-    def choose_srt(self) -> None:
-        file_name, _filter = QFileDialog.getOpenFileName(
-            self,
-            "Choose Placeholder SRT",
-            str(DOWNLOADS_OUTPUT_DIR),
-            "SRT subtitles (*.srt)",
-        )
-
-        if not file_name:
-            return
-
-        path = Path(file_name)
-        if path.suffix.lower() != ".srt":
-            QMessageBox.warning(self, "Choose SRT", "Please choose an .srt file.")
-            return
-
-        self.selected_srt = path
-        self.srt_label.setText(str(path))
-        self.load_srt_block_count(path)
-        self.update_fill_button()
-
-    def update_fill_button(self) -> None:
-        has_text = bool(self.paste_box.toPlainText())
-        has_srt = self.selected_srt is not None
-        self.fill_button.setEnabled(has_srt and has_text)
-        self.fm_fill_button.setEnabled(has_srt and has_text)
-
-    def load_srt_block_count(self, path: Path) -> None:
-        try:
-            self.current_srt_block_count = len(parse_srt_blocks(path))
-        except PlaceholderError as error:
-            self.current_srt_block_count = 0
-            self.append_fill_status(f"Could not read SRT blocks: {error}")
-            return
-
-        self.srt_label.setText(f"{path}\nSubtitle blocks: {self.current_srt_block_count}")
-        self.update_line_numbers()
-
-    def update_line_numbers(self) -> None:
-        pasted_line_count = max(1, len(self.preview_pasted_lines()))
-        count = max(self.current_srt_block_count, pasted_line_count)
-        numbers = "\n".join(f"{number:03d}" for number in range(1, count + 1))
-
-        with QSignalBlocker(self.line_numbers):
-            self.line_numbers.setPlainText(numbers)
-        self.sync_line_number_scroll(self.paste_box.verticalScrollBar().value())
-
-    def sync_line_number_scroll(self, value: int) -> None:
-        self.line_numbers.verticalScrollBar().setValue(value)
-        self.fm_box.verticalScrollBar().setValue(value)
-
-    def sync_fm_scroll_to_unicode(self, value: int) -> None:
-        self.paste_box.verticalScrollBar().setValue(value)
-        self.line_numbers.verticalScrollBar().setValue(value)
-
-    def append_fill_status(self, message: str) -> None:
-        self.fill_status_label.setText(message)
-
-    def preview_pasted_lines(self) -> list[str]:
-        mode = self.fill_mode_box.currentData() if hasattr(self, "fill_mode_box") else "keep"
-        return pasted_text_to_lines(self.paste_box.toPlainText(), mode)
-
-    def apply_smart_split_to_paste(self) -> None:
-        mode = self.fill_mode_box.currentData()
-        lines = pasted_text_to_lines(
-            self.paste_box.toPlainText(),
-            mode,
-            preserve_existing_lines=False,
-        )
-        if not lines:
-            self.append_fill_status("Paste Sinhala text first, then split the paragraph.")
-            return
-
-        with QSignalBlocker(self.paste_box):
-            self.paste_box.setPlainText("\n".join(lines))
-        self.update_fill_button()
-        self.update_line_numbers()
-        self.append_fill_status(f"Split paste into {len(lines)} lines.")
-
-    def clear_fm_output(self) -> None:
-        if not hasattr(self, "fm_box"):
-            return
-        with QSignalBlocker(self.fm_box):
-            self.fm_box.clear()
-        self.copy_fm_button.setEnabled(False)
-
-    def convert_fill_text_to_fm(self) -> str:
-        lines = self.preview_pasted_lines()
-        if not lines:
-            self.append_fill_status("Paste Sinhala Unicode text first.")
-            return ""
-
-        source_text = "\n".join(lines)
-        result = unicode_to_fm(source_text)
-        self.fm_box.setPlainText(result.text)
-        self.copy_fm_button.setEnabled(bool(result.text))
-
-        status = f"Converted {len(lines)} lines to FM/DL legacy text."
-        if result.warnings:
-            status += "\n" + "\n".join(f"Note: {warning}" for warning in result.warnings)
-        self.append_fill_status(status)
-        return result.text
-
-    def copy_fm_text(self) -> None:
-        text = self.fm_box.toPlainText()
-        if not text:
-            text = self.convert_fill_text_to_fm()
-        if not text:
-            return
-
-        QApplication.clipboard().setText(text)
-        self.append_fill_status("FM/DL text copied to clipboard.")
-
-    def update_dump_buttons(self) -> None:
-        has_text = bool(self.dump_paste_box.toPlainText().strip())
-        self.dump_unicode_button.setEnabled(has_text)
-        self.dump_fm_button.setEnabled(has_text)
-
-    def preview_dump_lines(self) -> list[str]:
-        mode = self.dump_mode_box.currentData() if hasattr(self, "dump_mode_box") else "keep"
-        return pasted_text_to_lines(self.dump_paste_box.toPlainText(), mode)
-
-    def update_dump_line_numbers(self) -> None:
-        pasted_line_count = max(1, len(self.preview_dump_lines()))
-        numbers = "\n".join(f"{number:03d}" for number in range(1, pasted_line_count + 1))
-
-        with QSignalBlocker(self.dump_line_numbers):
-            self.dump_line_numbers.setPlainText(numbers)
-        self.sync_dump_line_number_scroll(self.dump_paste_box.verticalScrollBar().value())
-
-    def sync_dump_line_number_scroll(self, value: int) -> None:
-        self.dump_line_numbers.verticalScrollBar().setValue(value)
-        self.dump_fm_box.verticalScrollBar().setValue(value)
-
-    def sync_dump_fm_scroll_to_unicode(self, value: int) -> None:
-        self.dump_paste_box.verticalScrollBar().setValue(value)
-        self.dump_line_numbers.verticalScrollBar().setValue(value)
-
-    def append_dump_status(self, message: str) -> None:
-        self.dump_status_label.setText(message)
-
-    def apply_dump_split(self) -> None:
-        mode = self.dump_mode_box.currentData()
-        lines = pasted_text_to_lines(
-            self.dump_paste_box.toPlainText(),
-            mode,
-            preserve_existing_lines=False,
-        )
-        if not lines:
-            self.append_dump_status("Paste Sinhala text first, then split the paragraph.")
-            return
-
-        with QSignalBlocker(self.dump_paste_box):
-            self.dump_paste_box.setPlainText("\n".join(lines))
-        self.update_dump_buttons()
-        self.update_dump_line_numbers()
-        self.append_dump_status(f"Split paste into {len(lines)} lines.")
-
-    def clear_dump_fm_output(self) -> None:
-        if not hasattr(self, "dump_fm_box"):
-            return
-        with QSignalBlocker(self.dump_fm_box):
-            self.dump_fm_box.clear()
-        self.dump_copy_fm_button.setEnabled(False)
-
-    def convert_dump_text_to_fm(self) -> str:
-        lines = self.preview_dump_lines()
-        if not lines:
-            self.append_dump_status("Paste Sinhala Unicode text first.")
-            return ""
-
-        source_text = "\n".join(lines)
-        result = unicode_to_fm(source_text)
-        self.dump_fm_box.setPlainText(result.text)
-        self.dump_copy_fm_button.setEnabled(bool(result.text))
-
-        status = f"Converted {len(lines)} lines to FM/DL legacy text."
-        if result.warnings:
-            status += "\n" + "\n".join(f"Note: {warning}" for warning in result.warnings)
-        self.append_dump_status(status)
-        return result.text
-
-    def copy_dump_fm_text(self) -> None:
-        text = self.dump_fm_box.toPlainText()
-        if not text:
-            text = self.convert_dump_text_to_fm()
-        if not text:
-            return
-
-        QApplication.clipboard().setText(text)
-        self.append_dump_status("FM/DL text copied to clipboard.")
-
-    def create_dump_unicode_srt(self) -> None:
-        try:
-            result = create_dump_srt(
-                self.dump_paste_box.toPlainText(),
-                paste_mode=self.dump_mode_box.currentData(),
-                output_dir=DOWNLOADS_OUTPUT_DIR,
-            )
-        except PlaceholderError as error:
-            QMessageBox.critical(self, "Could not create Dump SRT", str(error))
-            return
-
-        status_lines = [
-            f"Saved Unicode Dump SRT: {result.output_path}",
-            f"Blocks: {result.block_count} | Duration: {result.duration_per_block:.1f}s each",
-        ]
-        status_lines.extend(f"Note: {warning}" for warning in result.warnings)
-        self.append_dump_status("\n".join(status_lines))
-
-    def create_dump_fm_srt(self) -> None:
-        converted_text = self.dump_fm_box.toPlainText()
-        if not converted_text:
-            converted_text = self.convert_dump_text_to_fm()
-        if not converted_text:
-            return
-
-        try:
-            result = create_dump_srt(
-                converted_text,
-                paste_mode="keep",
-                output_dir=DOWNLOADS_OUTPUT_DIR,
-                legacy=True,
-            )
-        except PlaceholderError as error:
-            QMessageBox.critical(self, "Could not create FM/DL Dump SRT", str(error))
-            return
-
-        status_lines = [
-            f"Saved FM/DL Dump SRT: {result.output_path}",
-            f"Blocks: {result.block_count} | Duration: {result.duration_per_block:.1f}s each",
-        ]
-        status_lines.extend(f"Note: {warning}" for warning in result.warnings)
-        self.append_dump_status("\n".join(status_lines))
-
-    def start_generation(self) -> None:
-        if self.selected_input is None:
-            QMessageBox.warning(self, "No file selected", "Please import or drop an audio/video file first.")
-            return
-
-        mode = self.mode_box.currentData()
-        self.choose_audio_button.setEnabled(False)
-        self.choose_video_button.setEnabled(False)
-        self.drop_zone.setEnabled(False)
-        self.mode_box.setEnabled(False)
-        self.start_button.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.append_log("Starting placeholder generation...")
-
-        self.thread = QThread()
-        self.worker = PlaceholderWorker(self.selected_input, mode)
-        self.worker.moveToThread(self.thread)
-
-        self.thread.started.connect(self.worker.run)
-        self.worker.log_message.connect(self.append_log)
-        self.worker.progress_changed.connect(self.progress_bar.setValue)
-        self.worker.finished.connect(self.on_finished)
-        self.worker.failed.connect(self.on_failed)
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.failed.connect(self.thread.quit)
-        self.thread.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
-        self.thread.finished.connect(self.reset_worker_refs)
-
-        self.thread.start()
-
     def start_ai_generation(self) -> None:
         if self.selected_ai_input is None:
             QMessageBox.warning(self, "No file selected", "Please import or drop an audio/video file first.")
@@ -1269,12 +1019,7 @@ class MainWindow(QMainWindow):
         else:
             self.settings.remove("gemini_api_key")
 
-        self.ai_choose_audio_button.setEnabled(False)
-        self.ai_choose_video_button.setEnabled(False)
-        self.ai_drop_zone.setEnabled(False)
-        self.ai_key_input.setEnabled(False)
-        self.ai_remember_check.setEnabled(False)
-        self.ai_start_button.setEnabled(False)
+        self.set_ai_controls_enabled(False)
         self.ai_progress_bar.setValue(0)
         self.append_ai_log("Starting AI caption generation...")
 
@@ -1295,116 +1040,13 @@ class MainWindow(QMainWindow):
 
         self.ai_thread.start()
 
-    def create_unicode_filled_srt(self) -> None:
-        if self.selected_srt is None:
-            QMessageBox.warning(self, "No SRT selected", "Please choose a placeholder SRT first.")
-            return
-
-        try:
-            result = fill_placeholder_srt(
-                self.selected_srt,
-                self.paste_box.toPlainText(),
-                output_dir=DOWNLOADS_OUTPUT_DIR,
-                paste_mode=self.fill_mode_box.currentData(),
-            )
-        except PlaceholderError as error:
-            QMessageBox.critical(self, "Could not fill SRT", str(error))
-            return
-
-        status_lines = [
-            f"Saved: {result.output_path}",
-            (
-                f"Blocks: {result.block_count} | Replaced: {result.replaced_count} | "
-                f"Skipped blank lines: {result.skipped_count}"
-            ),
-        ]
-        status_lines.extend(f"Note: {warning}" for warning in result.warnings)
-        self.fill_status_label.setText("\n".join(status_lines))
-
-    def create_fm_filled_srt(self) -> None:
-        if self.selected_srt is None:
-            QMessageBox.warning(self, "No SRT selected", "Please choose a placeholder SRT first.")
-            return
-
-        converted_text = self.fm_box.toPlainText()
-        if not converted_text:
-            converted_text = self.convert_fill_text_to_fm()
-        if not converted_text:
-            return
-
-        try:
-            result = fill_placeholder_srt(
-                self.selected_srt,
-                converted_text,
-                output_dir=DOWNLOADS_OUTPUT_DIR,
-                paste_mode="keep",
-                output_suffix="_filled_fm",
-            )
-        except PlaceholderError as error:
-            QMessageBox.critical(self, "Could not fill SRT", str(error))
-            return
-
-        status_lines = [
-            f"Saved FM/DL SRT: {result.output_path}",
-            (
-                f"Blocks: {result.block_count} | Replaced: {result.replaced_count} | "
-                f"Skipped blank lines: {result.skipped_count}"
-            ),
-        ]
-        status_lines.extend(f"Note: {warning}" for warning in result.warnings)
-        self.fill_status_label.setText("\n".join(status_lines))
-
-    def append_log(self, message: str) -> None:
-        self.log_box.appendPlainText(message)
-        scrollbar = self.log_box.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-    def append_ai_log(self, message: str) -> None:
-        self.ai_log_box.appendPlainText(message)
-        scrollbar = self.ai_log_box.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-    def on_finished(
-        self,
-        subtitle_path: str,
-        subtitle_count: int,
-        speech_region_count: int,
-        warnings: list[str],
-    ) -> None:
-        self.progress_bar.setValue(100)
-        self.append_log(f"Done: {subtitle_path}")
-        self.append_log(f"Speech regions detected: {speech_region_count}")
-        self.append_log(f"Subtitle blocks written: {subtitle_count}")
-        self.output_label.setText(f"Saved SRT: {subtitle_path}")
-        self.selected_srt = Path(subtitle_path)
-        self.load_srt_block_count(self.selected_srt)
-        self.tabs.setCurrentIndex(1)
-        self.fill_status_label.setText(
-            f"Loaded generated SRT: {subtitle_path}\nPaste Sinhala lines, then create filled SRT."
-        )
-
-        self.choose_audio_button.setEnabled(True)
-        self.choose_video_button.setEnabled(True)
-        self.drop_zone.setEnabled(True)
-        self.mode_box.setEnabled(True)
-        self.start_button.setEnabled(True)
-
-        for warning in warnings:
-            self.append_log(f"Warning: {warning}")
-
-    def on_failed(self, message: str) -> None:
-        self.append_log("Error:")
-        self.append_log(message)
-        self.choose_audio_button.setEnabled(True)
-        self.choose_video_button.setEnabled(True)
-        self.drop_zone.setEnabled(True)
-        self.mode_box.setEnabled(True)
-        self.start_button.setEnabled(self.selected_input is not None)
-        if "FFmpeg is not installed" in message or "FFprobe is not installed" in message:
-            self.output_label.setText(FFMPEG_INSTALL_MESSAGE)
-            self.append_log("Install FFmpeg, then reopen SinhalaSTT and try again.")
-            return
-        QMessageBox.critical(self, "Placeholder generation failed", message)
+    def set_ai_controls_enabled(self, enabled: bool) -> None:
+        self.ai_choose_audio_button.setEnabled(enabled)
+        self.ai_choose_video_button.setEnabled(enabled)
+        self.ai_drop_zone.setEnabled(enabled)
+        self.ai_key_input.setEnabled(enabled)
+        self.ai_remember_check.setEnabled(enabled)
+        self.ai_start_button.setEnabled(enabled and self.selected_ai_input is not None)
 
     def on_ai_finished(
         self,
@@ -1417,43 +1059,28 @@ class MainWindow(QMainWindow):
         self.append_ai_log(f"Done: {subtitle_path}")
         self.append_ai_log(f"Subtitle blocks written: {subtitle_count}")
         self.ai_estimate_label.setText(
-            f"Saved AI SRT: {subtitle_path}\nDuration: {duration_seconds:.1f}s"
+            f"Saved AI SRT to Downloads: {subtitle_path}\nDuration: {duration_seconds:.1f}s"
         )
-        self.selected_srt = Path(subtitle_path)
-        self.load_srt_block_count(self.selected_srt)
-        self.tabs.setCurrentIndex(1)
-        self.fill_status_label.setText(
-            f"Loaded AI SRT: {subtitle_path}\nCorrect Sinhala lines if needed, then create filled SRT."
-        )
-
         for warning in warnings:
             self.append_ai_log(f"Warning: {warning}")
-
-        self.reset_ai_controls()
+        self.set_ai_controls_enabled(True)
 
     def on_ai_failed(self, message: str) -> None:
         self.append_ai_log("Error:")
         self.append_ai_log(message)
-        self.reset_ai_controls()
-        if "FFmpeg is not installed" in message or "FFprobe is not installed" in message:
+        self.set_ai_controls_enabled(True)
+        if "FFmpeg" in message or "FFprobe" in message:
             self.ai_estimate_label.setText(FFMPEG_INSTALL_MESSAGE)
             self.append_ai_log("Install FFmpeg, then reopen SinhalaSTT and try again.")
-
-    def reset_ai_controls(self) -> None:
-        self.ai_choose_audio_button.setEnabled(True)
-        self.ai_choose_video_button.setEnabled(True)
-        self.ai_drop_zone.setEnabled(True)
-        self.ai_key_input.setEnabled(True)
-        self.ai_remember_check.setEnabled(True)
-        self.ai_start_button.setEnabled(self.selected_ai_input is not None)
-
-    def reset_worker_refs(self) -> None:
-        self.thread = None
-        self.worker = None
 
     def reset_ai_worker_refs(self) -> None:
         self.ai_thread = None
         self.ai_worker = None
+
+    def append_ai_log(self, message: str) -> None:
+        self.ai_log_box.appendPlainText(message)
+        scrollbar = self.ai_log_box.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
 
 def main() -> None:

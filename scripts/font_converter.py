@@ -29,6 +29,11 @@ RULES = load_rules()
 ASCII_WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*")
 
 
+def contains_sinhala(text: str) -> bool:
+    """True if the text has any Sinhala Unicode characters."""
+    return any(SINHALA_START <= char <= SINHALA_END for char in text)
+
+
 def unicode_to_fm(text: str) -> FontConversionResult:
     protected_text, protected_values = protect_ascii_words(text)
     converted = protected_text
