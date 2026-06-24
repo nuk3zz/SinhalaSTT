@@ -22,10 +22,10 @@ the only feature that uses the internet.
 
 Get the latest build from the [Releases page](https://github.com/nuk3zz/SinhalaSTT/releases/latest):
 
-- **Windows:** `SinhalaSTT-1.0-Windows-x64.zip` — portable, no install needed,
-  FFmpeg is already bundled inside. Unzip and double-click `SinhalaSTT.exe`.
-- **macOS (Apple Silicon):** `SinhalaSTT-...-macOS-arm64.dmg` — needs FFmpeg via
-  `brew install ffmpeg`.
+- **Windows:** [`SinhalaSTT-1.0-Windows-x64.zip`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v1.0/SinhalaSTT-1.0-Windows-x64.zip) — portable, no
+  install needed, FFmpeg is already bundled inside. Unzip and double-click `SinhalaSTT.exe`.
+- **macOS (Apple Silicon):** [`SinhalaSTT-1.0-macOS-arm64.dmg`](https://github.com/nuk3zz/SinhalaSTT/releases/download/v1.0/SinhalaSTT-1.0-macOS-arm64.dmg) — drag to
+  Applications. Needs FFmpeg once via `brew install ffmpeg`.
 
 Because the app is not code-signed, the first launch may show a warning
 (Windows SmartScreen: `More info` -> `Run anyway`; macOS: right-click -> `Open`).
