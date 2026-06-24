@@ -38,7 +38,19 @@ FFmpeg must be available (`brew install ffmpeg` on macOS).
 3. Click **Load** (with Premiere Pro open).
 4. The **SinhalaSTT** panel appears under `Window → Extensions` (or the plugin menu).
 
-### 3. Use it
+### 3. Make a text template (one time)
+Premiere's API can't draw text from nothing — it places a **Motion Graphics
+Template (`.mogrt`)** and fills its text. Create one once:
+
+1. In Premiere: **Graphics/Text → New Layer → Text**, type anything, style it with
+   your Sinhala **FM/DL legacy font**.
+2. Select the text layer. In **Essential Graphics → Edit**, click the text
+   property's checkbox to make it **editable** (give it the name `Text`).
+3. **Export As Motion Graphics Template…** and save the `.mogrt` somewhere.
+
+In the panel, click **Choose text template (.mogrt)** and pick that file.
+
+### 4. Use it
 1. The panel shows **Helper: connected** when the server is running.
 2. Click an **audio clip** in your timeline, then **Read selected clip**.
 3. **Get timing from audio** (or tick *Use AI Caption* with a Gemini key).
@@ -46,6 +58,11 @@ FFmpeg must be available (`brew install ffmpeg` on macOS).
 5. **Add text blocks to timeline**.
 
 The **Sinhala → FM/DL** tool at the bottom works on its own (just needs the helper).
+
+### If insertion doesn't work on your version
+Click **Log API methods** in the panel and send me the log. It prints the exact
+methods your Premiere exposes on the sequence / track item / component, so I can
+match the import-template and set-text calls precisely.
 
 ## Status (what's proven vs. what needs your machine)
 

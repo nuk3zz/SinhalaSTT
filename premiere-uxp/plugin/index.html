@@ -37,6 +37,12 @@
           <button id="add-blocks" class="primary" disabled>Add text blocks to timeline</button>
         </div>
 
+        <div class="row">
+          <button id="choose-template">Choose text template (.mogrt)</button>
+          <button id="diagnostics">Log API methods</button>
+        </div>
+        <div id="template-info" class="readout">No .mogrt template chosen. Needed to place graphic text — see README.</div>
+
         <textarea id="script" rows="4" placeholder="Optional: paste your script. Each split line fills one block. Leave empty for blank blocks."></textarea>
         <label class="check"><input type="checkbox" id="use-ai" /> Use AI Caption instead of timing-only (needs Gemini key)</label>
         <input id="api-key" type="password" placeholder="Gemini API key (only for AI)" />

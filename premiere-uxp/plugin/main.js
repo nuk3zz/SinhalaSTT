@@ -29,6 +29,7 @@ const state = {
   clipDuration: 0, // out - in, seconds
   timelineStart: 0, // where the clip sits in the sequence, seconds
   blocks: null, // [{start, end, text}]
+  templatePath: null, // chosen .mogrt with an editable text field
 };
 
 const $ = (id) => document.getElementById(id);
@@ -111,6 +112,48 @@ async function safe(fn) {
   } catch (e) {
     return null;
   }
+}
+
+// Lists the callable methods on an object (own + prototype). This is the fastest
+// way to confirm the real API surface on a given Premiere version.
+function logMethods(label, obj) {
+  if (!obj) {
+    log(`${label}: <null>`);
+    return;
+  }
+  const names = new Set();
+  let cur = obj;
+  while (cur && cur !== Object.prototype) {
+    for (const key of Object.getOwnPropertyNames(cur)) {
+      if (key === "constructor") continue;
+      try {
+        if (typeof obj[key] === "function") names.add(key);
+      } catch (e) {
+        /* getters may throw */
+      }
+    }
+    cur = Object.getPrototypeOf(cur);
+  }
+  log(`${label} methods: ${Array.from(names).sort().join(", ") || "(none)"}`);
+}
+
+async function logApiDiagnostics() {
+  if (!ppro) {
+    log("premierepro module not available.");
+    return;
+  }
+  log("--- API diagnostics ---");
+  log("premierepro top-level: " + Object.keys(ppro).sort().join(", "));
+  const project = await safe(() => ppro.Project.getActiveProject());
+  const sequence = project && (await safe(() => project.getActiveSequence()));
+  logMethods("project", project);
+  logMethods("sequence", sequence);
+  if (sequence) {
+    const item = await firstSelectedAudioItem(sequence);
+    logMethods("trackItem", item);
+    if (item) logMethods("projectItem", await safe(() => item.getProjectItem()));
+  }
+  log("--- end diagnostics ---");
 }
 
 async function readSelectedClip() {
@@ -237,7 +280,12 @@ async function addBlocksToTimeline() {
     log("Get timing first.");
     return;
   }
+  if (!state.templatePath) {
+    log("Choose a .mogrt text template first (see README for how to make one).");
+    return;
+  }
   const texts = await blockTexts();
+  const videoTrackIndex = 0; // place graphics on the first video track for now
 
   log("Placing " + state.blocks.length + " text block(s) on the timeline…");
   let placed = 0;
@@ -247,41 +295,67 @@ async function addBlocksToTimeline() {
     const end = state.timelineStart + block.end;
     const text = texts[i] || "";
     try {
-      await placeTextGraphic(text, start, end);
+      await placeTextGraphic(text, start, end, videoTrackIndex);
       placed++;
     } catch (e) {
       log(`Block ${i + 1} insert failed: ${e.message || e}`);
-      // Stop spamming after the first failure; this is the part to wire up
-      // against the exact Premiere graphics API on your version.
+      // Stop after the first failure; click "Log API methods" and send me the
+      // output so we can match the exact import/parameter calls for your version.
       break;
     }
   }
   log(`Placed ${placed}/${state.blocks.length} block(s).`);
-  if (placed === 0) {
-    log(
-      "Timeline text insertion needs the graphics API for your Premiere version. " +
-      "The clip-read + timing pipeline works; share the version and we wire up insertion."
-    );
+}
+
+async function placeTextGraphic(text, startSeconds, endSeconds, videoTrackIndex) {
+  // Premiere UXP cannot create a text graphic from nothing — the supported path
+  // is: import a .mogrt that exposes an editable text field, then set that field.
+  if (!ppro) throw new Error("premierepro module unavailable");
+  if (!state.templatePath) throw new Error("Choose a .mogrt text template first.");
+
+  const project = await ppro.Project.getActiveProject();
+  const sequence = await project.getActiveSequence();
+  const tick = secondsToTick(startSeconds);
+
+  // Import the template to the timeline. Method names vary by version, so try the
+  // known candidates and let diagnostics reveal the right one if none match.
+  let trackItem = null;
+  const importArgsCandidates = [
+    () => sequence.importMGT(state.templatePath, tick, videoTrackIndex, 0),
+    () => sequence.importMGTFromLibrary(state.templatePath, tick, videoTrackIndex, 0),
+    () => project.importMGT(sequence, state.templatePath, tick, videoTrackIndex),
+  ];
+  for (const attempt of importArgsCandidates) {
+    trackItem = await safe(attempt);
+    if (trackItem) break;
+  }
+  if (!trackItem) throw new Error("could not import .mogrt (importMGT API not found — see diagnostics)");
+
+  // Set the exposed text parameter on the imported graphic.
+  const component = await safe(() => trackItem.getComponent?.(0)) || trackItem;
+  const param =
+    (await safe(() => component.getParamForDisplayName?.("Text"))) ||
+    (await safe(() => component.getParam?.(0)));
+  if (param) {
+    if (typeof param.setValue === "function") await param.setValue(text);
+    else if (typeof param.setText === "function") await param.setText(text);
+    else throw new Error("text parameter has no setValue/setText");
+  } else {
+    throw new Error("no editable text parameter found on the template");
   }
 }
 
-async function placeTextGraphic(text, startSeconds, endSeconds) {
-  // Best-effort: create a text Motion Graphic at the given time.
-  // The exact API differs between Premiere versions; this targets the current
-  // premierepro graphics API and is the integration point to confirm on-device.
-  if (!ppro) throw new Error("premierepro module unavailable");
-  const project = await ppro.Project.getActiveProject();
-  const sequence = await project.getActiveSequence();
-
-  if (typeof sequence.createTextGraphic === "function") {
-    await sequence.createTextGraphic(text, secondsToTick(startSeconds), secondsToTick(endSeconds));
-    return;
+async function chooseTemplate() {
+  try {
+    const fs = require("uxp").storage.localFileSystem;
+    const file = await fs.getFileForOpening({ types: ["mogrt"] });
+    if (!file) return;
+    state.templatePath = file.nativePath;
+    $("template-info").textContent = "Template: " + file.nativePath;
+    log("Template chosen.");
+  } catch (e) {
+    log("Could not choose template: " + (e.message || e));
   }
-  if (ppro.Graphics && typeof ppro.Graphics.createTextLayer === "function") {
-    await ppro.Graphics.createTextLayer(sequence, text, secondsToTick(startSeconds));
-    return;
-  }
-  throw new Error("no text-graphic API found");
 }
 
 function secondsToTick(seconds) {
@@ -316,6 +390,8 @@ function init() {
   $("read-clip").addEventListener("click", readSelectedClip);
   $("get-timing").addEventListener("click", getTiming);
   $("add-blocks").addEventListener("click", addBlocksToTimeline);
+  $("choose-template").addEventListener("click", chooseTemplate);
+  $("diagnostics").addEventListener("click", logApiDiagnostics);
   $("convert-fm").addEventListener("click", convertFm);
   $("copy-fm").addEventListener("click", () => {
     navigator.clipboard.setContent ? navigator.clipboard.setContent({ "text/plain": $("fm-out").value }) : null;
