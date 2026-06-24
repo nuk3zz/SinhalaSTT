@@ -241,13 +241,19 @@ def extract_audio(
     output_name: str,
     audio_dir: Path,
     log: LogCallback = default_log,
+    start: float | None = None,
+    duration: float | None = None,
 ) -> Path:
     audio_dir.mkdir(parents=True, exist_ok=True)
     audio_path = audio_dir / f"{output_name}.wav"
 
-    command = [
-        ffmpeg_path(),
-        "-y",
+    command = [ffmpeg_path(), "-y"]
+    # Trim to a clip region when start/duration are given (fast seek before -i).
+    if start is not None:
+        command += ["-ss", f"{max(0.0, start):.3f}"]
+    if duration is not None:
+        command += ["-t", f"{max(0.0, duration):.3f}"]
+    command += [
         "-i",
         str(input_file),
         "-vn",
@@ -847,6 +853,41 @@ def create_text_subtitles(
         is_sinhala=is_sinhala,
         warnings=warnings,
     )
+
+
+def analyze_audio_to_blocks(
+    input_file: str | Path,
+    mode: str = DEFAULT_PLACEHOLDER_MODE,
+    clip_start: float | None = None,
+    clip_duration: float | None = None,
+    log: LogCallback = default_log,
+) -> list[dict]:
+    """Detect timed placeholder blocks for an audio file (or a clip region).
+
+    Returns plain dicts (start, end, text) with times measured from the start of
+    the analysed region. Used by the Premiere helper server.
+    """
+    check_ffmpeg()
+    resolved = resolve_input_file(input_file)
+    ensure_input_file(resolved)
+
+    name = make_safe_output_name(resolved)
+    audio_path = extract_audio(
+        resolved,
+        f"{name}_seg",
+        CACHE_AUDIO_DIR,
+        log=log,
+        start=clip_start,
+        duration=clip_duration,
+    )
+
+    duration = get_audio_duration(audio_path)
+    silences = detect_silences(audio_path, silence_duration_for_mode(mode), log=log)
+    regions = build_speech_regions(duration, silences)
+    regions = filter_quiet_regions(audio_path, regions, log=log)
+    blocks = create_placeholder_blocks(regions, mode)
+
+    return [{"start": block.start, "end": block.end, "text": block.text} for block in blocks]
 
 
 def create_audio_subtitles(

@@ -18,6 +18,7 @@ from transcriber_core import (
     SubtitleBlock,
     default_log,
     default_progress,
+    ensure_input_file,
     extract_audio,
     get_audio_duration,
     make_safe_output_name,
@@ -286,6 +287,45 @@ def _blocks_from_response(data: dict[str, Any], duration_seconds: float) -> tupl
         warnings.append("Gemini returned very few subtitle blocks. Check the SRT carefully.")
 
     return blocks, warnings
+
+
+def generate_ai_caption_blocks(
+    input_file: str | Path,
+    api_key: str,
+    model: str = DEFAULT_GEMINI_MODEL,
+    clip_start: float | None = None,
+    clip_duration: float | None = None,
+    log: LogCallback = default_log,
+) -> list[dict]:
+    """Transcribe audio (or a clip region) with Gemini and return timed blocks.
+
+    Returns plain dicts (start, end, text) with times measured from the start of
+    the analysed region. Used by the Premiere helper server.
+    """
+    api_key = api_key.strip()
+    if not api_key:
+        raise AiCaptionError("Paste your Gemini API key first.")
+
+    resolved = resolve_input_file(input_file)
+    ensure_input_file(resolved)
+
+    name = make_safe_output_name(resolved)
+    audio_path = extract_audio(
+        resolved,
+        f"{name}_ai_seg",
+        CACHE_AUDIO_DIR,
+        log=log,
+        start=clip_start,
+        duration=clip_duration,
+    )
+    duration_seconds = get_audio_duration(audio_path)
+    log(f"Audio duration: {duration_seconds:.1f}s")
+
+    response_data = _gemini_generate_content(api_key, model, audio_path, duration_seconds, log=log)
+    data = _rest_response_to_json(response_data)
+    blocks, _warnings = _blocks_from_response(data, duration_seconds)
+
+    return [{"start": block.start, "end": block.end, "text": block.text} for block in blocks]
 
 
 def generate_ai_captions_srt(
