@@ -108,6 +108,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_timing()
             elif route == "/ai":
                 self._handle_ai()
+            elif route == "/diag":
+                self._handle_diag()
             else:
                 self._send(404, {"ok": False, "error": "Unknown endpoint"})
         except (PlaceholderError, AiCaptionError) as error:
@@ -143,6 +145,16 @@ class Handler(BaseHTTPRequestHandler):
             clip_duration=_float_or_none(data.get("clipDuration")),
         )
         self._send(200, {"ok": True, "blocks": blocks})
+
+    def _handle_diag(self) -> None:
+        # Receives the plugin's API diagnostics and writes them to a file so they
+        # can be inspected without copy/paste from inside Premiere.
+        data = self._read_json()
+        text = str(data.get("text", ""))
+        out_path = Path(__file__).resolve().parent / "last_diagnostics.txt"
+        out_path.write_text(text, encoding="utf-8")
+        print(f"Wrote diagnostics ({len(text)} chars) to {out_path}")
+        self._send(200, {"ok": True, "path": str(out_path)})
 
     def _handle_ai(self) -> None:
         data = self._read_json()

@@ -417,12 +417,18 @@ async function logApiDiagnostics() {
   }
   D("=== end diagnostics ===");
 
-  // Copy everything so it can be pasted as text (much better than a screenshot).
+  // Send to the helper, which writes them to a file the assistant can read.
+  try {
+    await callHelper("/diag", { text: lines.join("\n") });
+    log("(Diagnostics sent to the helper — saved to premiere-uxp/helper/last_diagnostics.txt)");
+  } catch (e) {
+    log("(Could not send diagnostics to helper: " + (e.message || e) + ")");
+  }
+  // Also try the clipboard as a fallback.
   try {
     await navigator.clipboard.setContent({ "text/plain": lines.join("\n") });
-    log("(Diagnostics copied to clipboard — paste them to your assistant.)");
   } catch (e) {
-    log("(Could not copy to clipboard: " + (e.message || e) + ")");
+    /* ignore */
   }
 }
 
