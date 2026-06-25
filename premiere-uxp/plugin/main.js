@@ -40,11 +40,12 @@ function log(message) {
   box.scrollTop = box.scrollHeight;
 }
 
-function setHelper(ok, detail) {
+let helperConnected = false;
+
+function setHelper(ok) {
   const pill = $("helper-status");
   pill.textContent = ok ? "Helper: connected" : "Helper: offline";
   pill.className = "pill " + (ok ? "pill-on" : "pill-off");
-  if (detail) log(detail);
 }
 
 async function callHelper(path, body, method = "POST") {
@@ -58,12 +59,18 @@ async function callHelper(path, body, method = "POST") {
   return data;
 }
 
-async function checkHelper() {
+async function checkHelper(verbose) {
   try {
     const data = await callHelper("/health", undefined, "GET");
-    setHelper(true, `Helper connected. FFmpeg available: ${data.ffmpeg}`);
+    if (!helperConnected || verbose) log(`Helper connected. FFmpeg available: ${data.ffmpeg}`);
+    helperConnected = true;
+    setHelper(true);
   } catch (e) {
-    setHelper(false, "Helper not reachable. Start it with: .venv/bin/python premiere-uxp/helper/server.py");
+    if (helperConnected || verbose) {
+      log("Helper offline. Double-click 'Start SinhalaSTT Helper.command' in the premiere-uxp folder.");
+    }
+    helperConnected = false;
+    setHelper(false);
   }
 }
 
@@ -397,7 +404,11 @@ function init() {
     navigator.clipboard.setContent ? navigator.clipboard.setContent({ "text/plain": $("fm-out").value }) : null;
     log("Copied FM/DL text.");
   });
-  checkHelper();
+  // Click the status pill to re-check on demand.
+  $("helper-status").addEventListener("click", () => checkHelper(true));
+  // Auto-connect: keep checking until the helper is up, then stop spamming.
+  checkHelper(true);
+  setInterval(() => checkHelper(false), 4000);
 }
 
 document.addEventListener("DOMContentLoaded", init);
