@@ -67,7 +67,7 @@ async function checkHelper(verbose) {
     setHelper(true);
   } catch (e) {
     if (helperConnected || verbose) {
-      log("Helper offline. Double-click 'Start SinhalaSTT Helper.command' in the premiere-uxp folder.");
+      log("Helper offline. Double-click 'start-helper.command' in the premiere-uxp folder.");
     }
     helperConnected = false;
     setHelper(false);

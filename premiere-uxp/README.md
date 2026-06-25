@@ -23,14 +23,19 @@ server. Nothing leaves your machine except the optional AI Caption call.
 ## How to run it
 
 ### 1. Start the helper
-From the project root, with the virtual environment that has the dependencies:
+**Easiest:** double-click `premiere-uxp/start-helper.command` in Finder. A small
+window opens and stays open — that *is* the helper. Closing it stops the helper.
+(First time: right-click the file → **Open** → **Open** to get past Gatekeeper.)
+
+**Or from a terminal**, at the project root:
 
 ```bash
 .venv/bin/python premiere-uxp/helper/server.py
 ```
 
-Leave that window open. It listens on `http://127.0.0.1:8765` (local only).
-FFmpeg must be available (`brew install ffmpeg` on macOS).
+Leave it running. It listens on `http://127.0.0.1:8765` (local only). FFmpeg must
+be available (`brew install ffmpeg` on macOS). The panel turns green automatically
+once the helper is up.
 
 ### 2. Load the plugin
 1. Open the **Adobe UXP Developer Tool**.
