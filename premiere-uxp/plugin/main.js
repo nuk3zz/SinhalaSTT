@@ -180,8 +180,13 @@ async function placeBlocks(items, statusEl) {
     try {
       await placeTextGraphic(items[i].text, items[i].start, items[i].end, 0);
       placed++;
+      if (i === 0) {
+        log("First block placed. MOGRT params: " + lastParamInfo);
+        safe(() => callHelper("/diag", { text: "MOGRT params: " + lastParamInfo }));
+      }
     } catch (e) {
-      log(`Block ${i + 1} insert failed: ${e.message || e}`);
+      log(`Block ${i + 1} failed: ${e.message || e}`);
+      safe(() => callHelper("/diag", { text: "INSERT ERROR: " + (e.message || e) }));
       break;
     }
   }
@@ -191,34 +196,64 @@ async function placeBlocks(items, statusEl) {
   }
 }
 
+let lastParamInfo = ""; // structure of the last inserted MOGRT, for debugging
+
 async function placeTextGraphic(text, startSeconds, endSeconds, videoTrackIndex) {
   if (!ppro) throw new Error("premierepro module unavailable");
   if (!state.templatePath) throw new Error("Choose a .mogrt text template first.");
 
   const project = await ppro.Project.getActiveProject();
   const sequence = await project.getActiveSequence();
+  const editor = await ppro.SequenceEditor.getEditor(sequence);
   const tick = secondsToTick(startSeconds);
 
-  let trackItem = null;
-  const candidates = [
-    () => sequence.importMGT(state.templatePath, tick, videoTrackIndex, 0),
-    () => sequence.importMGTFromLibrary(state.templatePath, tick, videoTrackIndex, 0),
-    () => project.importMGT(sequence, state.templatePath, tick, videoTrackIndex),
-  ];
-  for (const attempt of candidates) {
-    trackItem = await safe(attempt);
-    if (trackItem) break;
+  // 1) Insert the .mogrt onto the timeline. Returns the created track items.
+  let items = null;
+  const doInsert = () => {
+    items = editor.insertMogrtFromPath(state.templatePath, tick, videoTrackIndex, 0);
+  };
+  try {
+    await project.lockedAccess(doInsert);
+  } catch (e) {
+    doInsert(); // fallback: call directly if a lock isn't required
   }
-  if (!trackItem) throw new Error("could not import .mogrt (importMGT API not found — see diagnostics)");
+  if (!items || !items.length) throw new Error("insertMogrtFromPath returned no track items");
 
-  const component = (await safe(() => trackItem.getComponent?.(0))) || trackItem;
-  const param =
-    (await safe(() => component.getParamForDisplayName?.("Text"))) ||
-    (await safe(() => component.getParam?.(0)));
-  if (!param) throw new Error("no editable text parameter found on the template");
-  if (typeof param.setValue === "function") await param.setValue(text);
-  else if (typeof param.setText === "function") await param.setText(text);
-  else throw new Error("text parameter has no setValue/setText");
+  // 2) Find the editable text parameter and set its value via a transaction.
+  const found = await findTextParam(items[0]);
+  lastParamInfo = found.info.join(", ");
+  if (!found.param) throw new Error("inserted, but no text parameter found. params: " + lastParamInfo);
+
+  const keyframe = found.param.createKeyframe(text);
+  const action = found.param.createSetValueAction(keyframe, true);
+  const ok = await project.executeTransaction((compoundAction) => {
+    compoundAction.addAction(action);
+  }, "SinhalaSTT subtitle");
+  if (ok === false) throw new Error("executeTransaction failed to set the text");
+}
+
+async function findTextParam(item) {
+  const out = { param: null, info: [] };
+  const chain = await safe(() => item.getComponentChain?.());
+  if (!chain) {
+    out.info.push("no component chain");
+    return out;
+  }
+  const compCount = (await safe(() => chain.getComponentCount?.())) || 0;
+  for (let c = 0; c < compCount; c++) {
+    const comp = await safe(() => chain.getComponentAtIndex?.(c));
+    if (!comp) continue;
+    const cname = (await safe(() => comp.getDisplayName?.())) || "comp" + c;
+    const pCount = (await safe(() => comp.getParamCount?.())) || 0;
+    for (let p = 0; p < pCount; p++) {
+      const param = await safe(() => comp.getParam?.(p));
+      if (!param) continue;
+      const val = await safe(() => param.getStartValue?.());
+      out.info.push(`${cname}[${p}]:${typeof val}`);
+      if (!out.param && typeof val === "string") out.param = param;
+    }
+  }
+  return out;
 }
 
 function secondsToTick(seconds) {
