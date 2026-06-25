@@ -37,6 +37,22 @@ header {
   gap: 8px;
 }
 
+.tabs { display: flex; gap: 6px; }
+.tabs .tab { flex: 1; background: #3a3a3a; border: 1px solid #4a4a4a; padding: 7px; }
+.tabs .tab.active { background: #3a6cb5; border-color: #3a6cb5; color: #fff; }
+
+.tabpanel {
+  background: #353535;
+  border: 1px solid #454545;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tabpanel.hidden { display: none; }
+.footer .row { gap: 8px; }
+
 .card-title { font-weight: 700; font-size: 13px; }
 
 .hint { margin: 0; color: #a9adb4; font-size: 11px; }
@@ -67,6 +83,7 @@ select, input[type="password"], textarea {
 
 textarea { width: 100%; resize: vertical; font-family: inherit; }
 select { flex: 1; }
+input[type="number"] { width: 64px; }
 
 button {
   background: #4a4a4a;

@@ -11,56 +11,78 @@
         <div id="helper-status" class="pill pill-off">Helper: checking…</div>
       </header>
 
-      <!-- Tool 1: Audio clip -> timed text blocks -->
-      <section class="card">
-        <div class="card-title">Audio clip → text blocks</div>
+      <div class="tabs">
+        <button class="tab active" data-tab="text">Text → Subtitles</button>
+        <button class="tab" data-tab="audio">Audio → Subtitles</button>
+        <button class="tab" data-tab="ai">AI Caption</button>
+      </div>
+
+      <!-- TEXT TAB -->
+      <section class="tabpanel" id="tab-text">
         <p class="hint">
-          Select an audio clip in the timeline, then read it and lay timed text
-          blocks onto the sequence.
+          Paste your script, choose how to split it, and lay text blocks on the
+          timeline at the playhead. Sinhala auto-converts to FM/DL. No key needed.
         </p>
-
-        <div id="clip-info" class="readout">No clip read yet.</div>
-
+        <textarea id="script-text" rows="6" placeholder="Paste Sinhala or English text here"></textarea>
         <div class="row">
           <label>Split</label>
-          <select id="mode">
+          <select id="script-mode">
             <option value="sentence">Sentences</option>
             <option value="1">1 word</option>
             <option value="2">2 words</option>
             <option value="3">3 words</option>
           </select>
-          <button id="read-clip">Read selected clip</button>
+          <label>Each</label>
+          <input id="script-seconds" type="number" min="0.2" step="0.5" value="1" />
+          <span class="hint">s</span>
         </div>
+        <button id="create-from-script" class="primary">Create text blocks</button>
+        <div id="text-status" class="readout">Blocks are placed at the playhead position.</div>
+      </section>
 
+      <!-- AUDIO TAB -->
+      <section class="tabpanel hidden" id="tab-audio">
+        <p class="hint">
+          Experimental: select an audio clip in the timeline, then create timed
+          blocks from its pauses. Optionally paste a script to fill the words.
+          Timing is approximate.
+        </p>
+        <div id="clip-info" class="readout">No clip read yet.</div>
         <div class="row">
-          <button id="get-timing" disabled>Get timing from audio</button>
-          <button id="add-blocks" class="primary" disabled>Add text blocks to timeline</button>
+          <label>Split</label>
+          <select id="audio-mode">
+            <option value="sentence">Sentences</option>
+            <option value="1">1 word</option>
+            <option value="2">2 words</option>
+            <option value="3">3 words</option>
+          </select>
         </div>
+        <textarea id="audio-script" rows="3" placeholder="Optional: paste your script to fill the timing"></textarea>
+        <button id="audio-create" class="primary">Create timed blocks from selected clip</button>
+        <div id="audio-status" class="readout"></div>
+      </section>
 
+      <!-- AI TAB -->
+      <section class="tabpanel hidden" id="tab-ai">
+        <p class="hint">
+          Optional, online. Sends the selected clip's audio to Google Gemini using
+          your own API key, then places the captions on the timeline.
+        </p>
+        <input id="api-key" type="password" placeholder="Gemini API key" />
+        <div id="ai-clip-info" class="readout">No clip read yet.</div>
+        <button id="ai-create" class="primary">Generate AI captions from selected clip</button>
+        <div id="ai-status" class="readout"></div>
+      </section>
+
+      <!-- FOOTER: one-time template + diagnostics + log -->
+      <section class="card footer">
         <div class="row">
-          <button id="choose-template">Choose text template (.mogrt)</button>
+          <button id="choose-template">Text template…</button>
           <button id="diagnostics">Log API methods</button>
         </div>
-        <div id="template-info" class="readout">No .mogrt template chosen. Needed to place graphic text — see README.</div>
-
-        <textarea id="script" rows="4" placeholder="Optional: paste your script. Each split line fills one block. Leave empty for blank blocks."></textarea>
-        <label class="check"><input type="checkbox" id="use-ai" /> Use AI Caption instead of timing-only (needs Gemini key)</label>
-        <input id="api-key" type="password" placeholder="Gemini API key (only for AI)" />
+        <div id="template-info" class="hint">No .mogrt template chosen (one-time, for placing graphic text).</div>
+        <div id="log" class="log"></div>
       </section>
-
-      <!-- Tool 2: Offline FM/DL conversion -->
-      <section class="card">
-        <div class="card-title">Sinhala → FM/DL legacy text</div>
-        <p class="hint">Convert Sinhala Unicode to FM/DL legacy-font text (offline).</p>
-        <textarea id="fm-in" rows="3" placeholder="Paste Sinhala Unicode here"></textarea>
-        <div class="row">
-          <button id="convert-fm">Convert</button>
-          <button id="copy-fm" disabled>Copy result</button>
-        </div>
-        <textarea id="fm-out" rows="3" readonly placeholder="FM/DL text appears here"></textarea>
-      </section>
-
-      <div id="log" class="log"></div>
     </div>
     <script src="main.js"></script>
   </body>
