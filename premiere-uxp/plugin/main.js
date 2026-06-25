@@ -356,14 +356,11 @@ function loadTemplate() {
 
 // --- Diagnostics --------------------------------------------------------------
 
-function logMethods(label, obj) {
-  if (!obj) {
-    log(`${label}: <null>`);
-    return;
-  }
+function methodNames(obj) {
+  if (!obj) return null;
   const names = new Set();
   let cur = obj;
-  while (cur && cur !== Object.prototype) {
+  while (cur && cur !== Object.prototype && cur !== Function.prototype) {
     for (const key of Object.getOwnPropertyNames(cur)) {
       if (key === "constructor") continue;
       try {
@@ -374,26 +371,59 @@ function logMethods(label, obj) {
     }
     cur = Object.getPrototypeOf(cur);
   }
-  log(`${label} methods: ${Array.from(names).sort().join(", ") || "(none)"}`);
+  return Array.from(names).sort();
+}
+
+function methodsLine(label, obj) {
+  const names = methodNames(obj);
+  return `${label}: ${names ? names.join(", ") || "(none)" : "<null>"}`;
 }
 
 async function logApiDiagnostics() {
+  const lines = [];
+  const D = (m) => {
+    lines.push(m);
+    log(m);
+  };
+
   if (!ppro) {
-    log("premierepro module not available.");
+    D("premierepro module not available.");
     return;
   }
-  log("--- API diagnostics ---");
-  log("premierepro top-level: " + Object.keys(ppro).sort().join(", "));
+  D("=== SinhalaSTT API diagnostics (Premiere) ===");
+  D("premierepro: " + Object.keys(ppro).sort().join(", "));
+
+  // Static factories/utilities most likely to hold the insert-MOGRT call.
+  for (const cls of ["SequenceEditor", "ComponentFactory", "SequenceUtils", "ProjectUtils", "Utils"]) {
+    if (ppro[cls]) D(methodsLine(cls + " (static)", ppro[cls]));
+  }
+
   const project = await safe(() => ppro.Project.getActiveProject());
   const sequence = project && (await safe(() => project.getActiveSequence()));
-  logMethods("project", project);
-  logMethods("sequence", sequence);
+  D(methodsLine("project", project));
+  D(methodsLine("sequence", sequence));
+
+  // Try to obtain a SequenceEditor (the editing entry point in v26 UXP).
+  let editor =
+    (await safe(() => ppro.SequenceEditor.getEditor?.(sequence))) ||
+    (await safe(() => ppro.SequenceEditor.createSequenceEditor?.(sequence))) ||
+    (await safe(() => sequence && sequence.getEditor?.()));
+  D(methodsLine("sequenceEditor", editor));
+
   if (sequence) {
     const item = await firstSelectedAudioItem(sequence);
-    logMethods("trackItem", item);
-    if (item) logMethods("projectItem", await safe(() => item.getProjectItem()));
+    D(methodsLine("trackItem", item));
+    if (item) D(methodsLine("projectItem", await safe(() => item.getProjectItem())));
   }
-  log("--- end diagnostics ---");
+  D("=== end diagnostics ===");
+
+  // Copy everything so it can be pasted as text (much better than a screenshot).
+  try {
+    await navigator.clipboard.setContent({ "text/plain": lines.join("\n") });
+    log("(Diagnostics copied to clipboard — paste them to your assistant.)");
+  } catch (e) {
+    log("(Could not copy to clipboard: " + (e.message || e) + ")");
+  }
 }
 
 // --- Wire up ------------------------------------------------------------------
