@@ -23,7 +23,10 @@ Endpoints (all JSON):
 from __future__ import annotations
 
 import json
+import socket
 import sys
+import threading
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -41,8 +44,14 @@ from transcriber_core import (  # noqa: E402
 )
 
 
-HOST = "127.0.0.1"
 PORT = 8765
+# Listen on both loopback families so a "localhost" client reaches us whether it
+# resolves to IPv4 (127.0.0.1) or IPv6 (::1).
+HOSTS = ["127.0.0.1", "::1"]
+
+
+class ThreadingHTTPServerV6(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
 
 
 def _float_or_none(value) -> float | None:
@@ -155,14 +164,30 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"SinhalaSTT helper running at http://{HOST}:{PORT}")
+    servers = []
+    for host in HOSTS:
+        server_class = ThreadingHTTPServerV6 if ":" in host else ThreadingHTTPServer
+        try:
+            server = server_class((host, PORT), Handler)
+        except OSError as error:
+            print(f"(note: could not listen on {host}: {error})")
+            continue
+        servers.append(server)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    if not servers:
+        print(f"Could not start the helper on port {PORT}. Is it already running?")
+        return
+
+    print(f"SinhalaSTT helper running at http://localhost:{PORT}")
     print("Leave this window open while using the Premiere plugin. Press Ctrl+C to stop.")
     try:
-        server.serve_forever()
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         print("\nStopping helper.")
-        server.shutdown()
+        for server in servers:
+            server.shutdown()
 
 
 if __name__ == "__main__":

@@ -11,7 +11,8 @@
  *     .venv/bin/python premiere-uxp/helper/server.py
  */
 
-const HELPER = "http://127.0.0.1:8765";
+// UXP only permits hostnames (not raw IPs) in network requests, so use localhost.
+const HELPER = "http://localhost:8765";
 const TICKS_PER_SECOND = 254016000000; // Premiere TickTime resolution
 
 // Loaded lazily so the panel still opens if the module name differs by version.
