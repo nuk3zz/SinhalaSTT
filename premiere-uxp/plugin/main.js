@@ -66,9 +66,14 @@ async function checkHelper(verbose) {
     helperConnected = true;
     setHelper(true);
   } catch (e) {
+    const detail = e && e.message ? e.message : String(e);
     if (helperConnected || verbose) {
-      log("Helper offline: " + (e && e.message ? e.message : e));
-      log("(If this says permission/denied, it's the UXP network permission — reload the plugin fully.)");
+      log("Helper offline: " + detail);
+    }
+    // Surface the reason in the big visible box so it is easy to read/screenshot.
+    const info = $("clip-info");
+    if (info && !state.filePath) {
+      info.textContent = "Helper not reachable.\nError: " + detail + "\n(typeof fetch: " + typeof fetch + ")";
     }
     helperConnected = false;
     setHelper(false);
