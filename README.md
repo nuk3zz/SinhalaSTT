@@ -18,6 +18,20 @@ When the text is **Sinhala Unicode**, SinhalaSTT automatically also saves an
 makes one normal `.srt`. The Text and Audio tools work fully offline; AI Caption is
 the only feature that uses the internet.
 
+## Screenshots
+
+### Text -> Subtitles
+
+![SinhalaSTT Text to Subtitles screen](assets/screenshot-text-subtitles.png)
+
+### Audio -> Subtitles
+
+![SinhalaSTT Audio to Subtitles screen](assets/screenshot-audio-subtitles.png)
+
+### AI Caption
+
+![SinhalaSTT AI Caption screen](assets/screenshot-ai-caption.png)
+
 ## Download
 
 Get the latest build from the [Releases page](https://github.com/nuk3zz/SinhalaSTT/releases/latest):
