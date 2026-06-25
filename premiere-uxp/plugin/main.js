@@ -67,7 +67,8 @@ async function checkHelper(verbose) {
     setHelper(true);
   } catch (e) {
     if (helperConnected || verbose) {
-      log("Helper offline. Double-click 'start-helper.command' in the premiere-uxp folder.");
+      log("Helper offline: " + (e && e.message ? e.message : e));
+      log("(If this says permission/denied, it's the UXP network permission — reload the plugin fully.)");
     }
     helperConnected = false;
     setHelper(false);
